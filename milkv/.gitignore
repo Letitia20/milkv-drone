@@ -1,0 +1,7 @@
+build/
+build-riscv/
+milkv_drone
+mpu_test
+*.d
+*.exe
+*.o
