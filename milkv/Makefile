@@ -1,5 +1,6 @@
 TARGET := milkv_drone
 MPU_TEST_TARGET := mpu_test
+IBUS_READ_TARGET := ibus_read
 SRC_DIR := src
 BUILD_DIR := build/duo-riscv64
 USE_RT ?= 0
@@ -32,11 +33,14 @@ override CC := $(TOOLCHAIN_PREFIX)gcc
 override CXX := $(TOOLCHAIN_PREFIX)g++
 
 SOURCES := $(sort $(wildcard $(SRC_DIR)/*.cpp))
-MAIN_SOURCES := $(filter-out $(SRC_DIR)/mpu_test.cpp,$(SOURCES))
+STANDALONE_SOURCES := $(SRC_DIR)/mpu_test.cpp $(SRC_DIR)/ibus_read.cpp $(SRC_DIR)/ibus_reader.cpp
+MAIN_SOURCES := $(filter-out $(STANDALONE_SOURCES),$(SOURCES))
 MPU_TEST_SOURCES := $(SRC_DIR)/mpu_test.cpp $(SRC_DIR)/imu_mpu6050.cpp
+IBUS_READ_SOURCES := $(SRC_DIR)/ibus_read.cpp
 OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(MAIN_SOURCES))
 MPU_TEST_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(MPU_TEST_SOURCES))
-DEPENDS := $(sort $(OBJECTS:.o=.d) $(MPU_TEST_OBJECTS:.o=.d))
+IBUS_READ_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(IBUS_READ_SOURCES))
+DEPENDS := $(sort $(OBJECTS:.o=.d) $(MPU_TEST_OBJECTS:.o=.d) $(IBUS_READ_OBJECTS:.o=.d))
 THREAD_FLAGS := -pthread
 
 CPPFLAGS += -I$(SRC_DIR)
@@ -49,12 +53,15 @@ endif
 
 .PHONY: all clean print-toolchain
 
-all: $(TARGET) $(MPU_TEST_TARGET)
+all: $(TARGET) $(MPU_TEST_TARGET) $(IBUS_READ_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(MPU_TEST_TARGET): $(MPU_TEST_OBJECTS)
+	$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(IBUS_READ_TARGET): $(IBUS_READ_OBJECTS)
 	$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
@@ -71,6 +78,6 @@ print-toolchain:
 	@echo "LDFLAGS=$(LDFLAGS)"
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET) $(MPU_TEST_TARGET)
+	rm -rf $(BUILD_DIR) $(TARGET) $(MPU_TEST_TARGET) $(IBUS_READ_TARGET)
 
 -include $(DEPENDS)

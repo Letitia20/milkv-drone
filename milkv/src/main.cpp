@@ -2,6 +2,7 @@
 #include "imu_mpu6050.hpp"
 #include "loop_rate.hpp"
 #include "motor_mixer.hpp"
+#include "pid.hpp"
 #include "protocol.hpp"
 #include "serial.hpp"
 
@@ -30,9 +31,23 @@ constexpr int kArmSwitchHighUs = 1800;
 constexpr int kArmSwitchLowUs = 1200;
 constexpr auto kRcTimeout = std::chrono::milliseconds(500);
 constexpr auto kHeartbeatPeriod = std::chrono::seconds(1);
-constexpr auto kAttitudeLogPeriod = std::chrono::milliseconds(100);
+constexpr auto kAttitudeLogPeriod = std::chrono::milliseconds(100);  // 10 Hz
 constexpr int kGyroCalibrationSamples = 200;
 constexpr auto kGyroCalibrationSamplePeriod = std::chrono::milliseconds(10);
+
+// PID bench test gains (estimate for 250mm quad, tune before flight)
+// These map attitude error (deg) → motor correction (us)
+constexpr double kTestPidRollKp = 20.0;
+constexpr double kTestPidRollKi = 8.0;
+constexpr double kTestPidRollKd = 5.0;
+constexpr double kTestPidPitchKp = 20.0;
+constexpr double kTestPidPitchKi = 8.0;
+constexpr double kTestPidPitchKd = 5.0;
+constexpr double kTestPidYawKp = 15.0;   // yaw is rate-mode: deg/s → us
+constexpr double kTestPidYawKi = 5.0;
+constexpr double kTestPidYawKd = 3.0;
+constexpr double kPidIntegralLimit = 200.0;
+constexpr double kPidOutputLimit = 400.0;
 
 struct GyroBias {
     double gx_dps {0.0};
@@ -123,6 +138,14 @@ int main(int argc, char* argv[]) {
     const std::string uart_device = argv[1];
     const int baudrate = (argc >= 3) ? parseBaudrate(argv[2], 115200) : 115200;
 
+    bool test_pid = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--test-pid") {
+            test_pid = true;
+            break;
+        }
+    }
+
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
@@ -148,6 +171,18 @@ int main(int argc, char* argv[]) {
     drone::ComplementaryFilter filter;
     drone::LoopRate loop_rate(kMainLoopHz);
 
+    // PID controllers for bench testing
+    drone::PID pid_roll(kTestPidRollKp, kTestPidRollKi, kTestPidRollKd);
+    pid_roll.setIntegralLimit(kPidIntegralLimit);
+    pid_roll.setOutputLimits(-kPidOutputLimit, kPidOutputLimit);
+    drone::PID pid_pitch(kTestPidPitchKp, kTestPidPitchKi, kTestPidPitchKd);
+    pid_pitch.setIntegralLimit(kPidIntegralLimit);
+    pid_pitch.setOutputLimits(-kPidOutputLimit, kPidOutputLimit);
+    drone::PID pid_yaw(kTestPidYawKp, kTestPidYawKi, kTestPidYawKd);
+    pid_yaw.setIntegralLimit(kPidIntegralLimit);
+    pid_yaw.setOutputLimits(-kPidOutputLimit, kPidOutputLimit);
+    drone::MotorMixer mixer;
+
     drone::protocol::RcData rc;
     drone::protocol::BatteryData battery;
     auto last_rc_time = std::chrono::steady_clock::time_point::min();
@@ -163,6 +198,19 @@ int main(int argc, char* argv[]) {
     std::cout << "Milk-V Duo 256 drone controller skeleton started at " << kMainLoopHz << " Hz\n"
               << "Safety notice: bench-test without propellers installed. Milk-V sends UART targets only;\n"
               << "STM32 must own ESC PWM generation, timeout failsafe, and emergency motor stop.\n";
+
+    if (test_pid) {
+        std::cout << "=== PID TEST MODE ===\n"
+                  << "Target: roll=0 deg, pitch=0 deg, yaw rate=0 dps\n"
+                  << "Gains: roll kp=" << kTestPidRollKp << " ki=" << kTestPidRollKi
+                  << " kd=" << kTestPidRollKd << "\n"
+                  << "       pitch kp=" << kTestPidPitchKp << " ki=" << kTestPidPitchKi
+                  << " kd=" << kTestPidPitchKd << "\n"
+                  << "       yaw kp=" << kTestPidYawKp << " ki=" << kTestPidYawKi
+                  << " kd=" << kTestPidYawKd << "\n"
+                  << "Motors LOCKED at " << drone::protocol::kPwmMinUs << "us (safe).\n"
+                  << "Tilt the board to see PID corrections.\n";
+    }
 
     while (g_running) {
         const auto now = std::chrono::steady_clock::now();
@@ -219,14 +267,34 @@ int main(int argc, char* argv[]) {
             armed = true;
         }
 
-        // Version 1 intentionally never maps throttle/PID output to motors.
-        // This keeps the UART command path testable without spinning motors.
-        const std::array<int, 4> motors {
-            drone::protocol::kPwmMinUs,
-            drone::protocol::kPwmMinUs,
-            drone::protocol::kPwmMinUs,
-            drone::protocol::kPwmMinUs,
-        };
+        // PID test mode: compute corrections from attitude error
+        double pid_roll_out = 0.0;
+        double pid_pitch_out = 0.0;
+        double pid_yaw_out = 0.0;
+        drone::MotorOutputs mixed_motors;
+        if (test_pid && imu_valid) {
+            pid_roll_out = pid_roll.update(0.0, attitude.roll_deg, dt_s);
+            pid_pitch_out = pid_pitch.update(0.0, attitude.pitch_deg, dt_s);
+            pid_yaw_out = pid_yaw.update(0.0, imu_sample.gz_dps, dt_s);
+            mixed_motors = mixer.mix(
+                static_cast<double>(drone::protocol::kPwmMidUs),
+                pid_roll_out,
+                pid_pitch_out,
+                pid_yaw_out);
+        }
+
+        // In test_pid mode, send real computed motor values over UART.
+        // Otherwise fall back to 1000us (safe stop).
+        // SAFETY: without STM32, UART writes are harmless noise.
+        // With STM32, the coprocessor must still enforce its own failsafe.
+        const std::array<int, 4> motors = (test_pid && imu_valid)
+            ? mixed_motors.asArray()
+            : std::array<int, 4>{
+                drone::protocol::kPwmMinUs,
+                drone::protocol::kPwmMinUs,
+                drone::protocol::kPwmMinUs,
+                drone::protocol::kPwmMinUs,
+            };
 
         bool write_ok = true;
         if (armed) {
@@ -253,7 +321,12 @@ int main(int argc, char* argv[]) {
                       << " gx_dps=" << imu_sample.gx_dps
                       << " gy_dps=" << imu_sample.gy_dps
                       << " gz_dps=" << imu_sample.gz_dps
-                      << " invalid_imu=" << (invalid_imu_safety ? 1 : 0) << "\n";
+                      << " invalid_imu=" << (invalid_imu_safety ? 1 : 0)
+                      << " pid_r=" << pid_roll_out
+                      << " pid_p=" << pid_pitch_out
+                      << " pid_y=" << pid_yaw_out
+                      << " mx=[" << mixed_motors.m1 << ',' << mixed_motors.m2 << ','
+                      << mixed_motors.m3 << ',' << mixed_motors.m4 << "]\n";
             next_attitude_log += kAttitudeLogPeriod;
         }
 
