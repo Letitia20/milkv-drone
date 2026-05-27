@@ -4,25 +4,23 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <dirent.h>
 #include <fstream>
 #include <sys/stat.h>
 #include <thread>
 #include <utility>
-#include <vector>
 
 namespace drone {
 namespace {
 
 constexpr std::array<EscPwmConfig, 4> kEscPwmConfigs {{
     // ESC1 = left front = GP4 = Pin 6 = global PWM5 = pwmchip4/pwm1
-    {1, "left_front", "GP4", 6, 5, kEscPwmChipBase, 1},
+    {1, "left_front", "GP4", 6, 5, kEscPwmLowChipBase, 1},
     // ESC2 = right front = GP5 = Pin 7 = global PWM6 = pwmchip4/pwm2
-    {2, "right_front", "GP5", 7, 6, kEscPwmChipBase, 2},
+    {2, "right_front", "GP5", 7, 6, kEscPwmLowChipBase, 2},
     // ESC3 = left rear = GP12 = Pin 16 = global PWM4 = pwmchip4/pwm0
-    {3, "left_rear", "GP12", 16, 4, kEscPwmChipBase, 0},
-    // ESC4 = right rear = GP2 = Pin 4 = global PWM7 = pwmchip4/pwm3
-    {4, "right_rear", "GP2", 4, 7, kEscPwmChipBase, 3},
+    {3, "left_rear", "GP12", 16, 4, kEscPwmLowChipBase, 0},
+    // ESC4 = right rear = GP6 = Pin 9 = global PWM9 = pwmchip8/pwm1
+    {4, "right_rear", "GP6", 9, 9, kEscPwmHighChipBase, 1},
 }};
 
 bool pathExists(const std::string& path) {
@@ -37,27 +35,15 @@ std::string joinPath(const std::string& a, const std::string& b) {
     return a + "/" + b;
 }
 
-std::vector<std::string> listPwmChips(const std::string& pwm_root) {
-    std::vector<std::string> chips;
-    DIR* dir = ::opendir(pwm_root.c_str());
-    if (!dir) {
-        return chips;
-    }
-
-    while (dirent* ent = ::readdir(dir)) {
-        const std::string name = ent->d_name;
-        if (name.rfind("pwmchip", 0) == 0) {
-            chips.push_back(joinPath(pwm_root, name));
-        }
-    }
-    ::closedir(dir);
-
-    std::sort(chips.begin(), chips.end());
-    return chips;
-}
-
 std::string pwmChipNameFromBase(int base) {
     return "pwmchip" + std::to_string(base);
+}
+
+bool pathLooksLikeChipBase(const std::string& chip_path, int chip_base) {
+    const std::string expected = pwmChipNameFromBase(chip_base);
+    return chip_path == expected ||
+           (chip_path.size() >= expected.size() &&
+            chip_path.compare(chip_path.size() - expected.size(), expected.size(), expected) == 0);
 }
 
 }  // namespace
@@ -86,14 +72,12 @@ const std::string& EscPwmSysfs::lastError() const {
 }
 
 bool EscPwmSysfs::initialize(const std::string& forced_chip) {
-    const std::string chip_path = findPwmChip(forced_chip);
-    if (chip_path.empty()) {
-        return false;
-    }
-
     for (std::size_t i = 0; i < channels_.size(); ++i) {
         channels_[i].config = kEscPwmConfigs[i];
-        channels_[i].chip_path = chip_path;
+        channels_[i].chip_path = findPwmChip(channels_[i].config.chip_base, forced_chip);
+        if (channels_[i].chip_path.empty()) {
+            return false;
+        }
         if (!configureChannel(channels_[i])) {
             return false;
         }
@@ -185,8 +169,8 @@ bool EscPwmSysfs::exportChannel(ChannelState& channel) {
     return false;
 }
 
-std::string EscPwmSysfs::findPwmChip(const std::string& forced_chip) {
-    if (!forced_chip.empty()) {
+std::string EscPwmSysfs::findPwmChip(int chip_base, const std::string& forced_chip) {
+    if (!forced_chip.empty() && pathLooksLikeChipBase(forced_chip, chip_base)) {
         const std::string chip_path = forced_chip.rfind("/", 0) == 0
             ? forced_chip
             : joinPath(pwm_root_, forced_chip);
@@ -197,23 +181,12 @@ std::string EscPwmSysfs::findPwmChip(const std::string& forced_chip) {
         return chip_path;
     }
 
-    const std::string expected_chip = joinPath(pwm_root_, pwmChipNameFromBase(kEscPwmChipBase));
+    const std::string expected_chip = joinPath(pwm_root_, pwmChipNameFromBase(chip_base));
     if (chipHasRequiredChannels(expected_chip)) {
         return expected_chip;
     }
 
-    for (const auto& chip_path : listPwmChips(pwm_root_)) {
-        const std::string expected_suffix = "/" + pwmChipNameFromBase(kEscPwmChipBase);
-        if (chip_path.size() >= expected_suffix.size() &&
-            chip_path.compare(chip_path.size() - expected_suffix.size(),
-                              expected_suffix.size(),
-                              expected_suffix) == 0 &&
-            chipHasRequiredChannels(chip_path)) {
-            return chip_path;
-        }
-    }
-
-    last_error_ = "no " + pwmChipNameFromBase(kEscPwmChipBase) +
+    last_error_ = "no " + pwmChipNameFromBase(chip_base) +
                   " under " + pwm_root_ + " exposes local pwm0..pwm3";
     return {};
 }

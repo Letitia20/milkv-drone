@@ -28,9 +28,9 @@ int main() {
         std::cerr << "ESC3 mapping is wrong\n";
         return 1;
     }
-    if (configs[3].esc_id != 4 || std::string(configs[3].gpio) != "GP2" ||
-        configs[3].pin != 4 || configs[3].pwm_channel != 7 ||
-        configs[3].chip_base != 4 || configs[3].local_channel != 3) {
+    if (configs[3].esc_id != 4 || std::string(configs[3].gpio) != "GP6" ||
+        configs[3].pin != 9 || configs[3].pwm_channel != 9 ||
+        configs[3].chip_base != 8 || configs[3].local_channel != 1) {
         std::cerr << "ESC4 mapping is wrong\n";
         return 1;
     }

@@ -170,7 +170,7 @@ int main(int argc, char* argv[]) {
     drone::EscPwmSysfs esc_pwm;
     if (!esc_pwm.initialize(pwm_chip)) {
         std::cerr << "Failed to initialize ESC sysfs PWM output: " << esc_pwm.lastError() << "\n";
-        std::cerr << "Run as root and pass --pwm-chip pwmchipX if auto-scan picked the wrong chip.\n";
+        std::cerr << "Run as root; expected pwmchip4 for ESC1..ESC3 and pwmchip8 for ESC4 PWM9.\n";
         return 1;
     }
     std::cout << "ESC sysfs PWM output initialized at 50Hz; all ESCs held at "

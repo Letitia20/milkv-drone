@@ -8,8 +8,8 @@ namespace drone {
 constexpr int kEscPwmPeriodNs = 20000000;
 constexpr int kEscPwmMinUs = 1000;
 constexpr int kEscPwmMaxUs = 2000;
-constexpr int kEscPwmChipBase = 4;
-constexpr const char* kEscPwmDefaultChip = "pwmchip4";
+constexpr int kEscPwmLowChipBase = 4;
+constexpr int kEscPwmHighChipBase = 8;
 
 struct EscPwmConfig {
     int esc_id;
@@ -51,7 +51,7 @@ private:
 
     bool configureChannel(ChannelState& channel);
     bool exportChannel(ChannelState& channel);
-    std::string findPwmChip(const std::string& forced_chip);
+    std::string findPwmChip(int chip_base, const std::string& forced_chip);
     bool chipHasRequiredChannels(const std::string& chip_path);
     bool writeTextFile(const std::string& path, const std::string& value);
     bool writeIntFile(const std::string& path, int value);
