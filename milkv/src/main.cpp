@@ -1,10 +1,10 @@
 #include "complementary_filter.hpp"
+#include "ibus_receiver.hpp"
 #include "imu_mpu6050.hpp"
 #include "loop_rate.hpp"
 #include "motor_mixer.hpp"
 #include "pid.hpp"
 #include "protocol.hpp"
-#include "serial.hpp"
 
 #include <array>
 #include <atomic>
@@ -27,13 +27,13 @@ void handleSignal(int) {
 constexpr double kMainLoopHz = 100.0;
 constexpr int kLowVoltageMv = 9600;
 constexpr int kThrottleLowUs = 1100;
-constexpr int kArmSwitchHighUs = 1800;
-constexpr int kArmSwitchLowUs = 1200;
-constexpr auto kRcTimeout = std::chrono::milliseconds(500);
+constexpr int kSwitchThresholdUs = 1500;
+constexpr auto kRcTimeout = std::chrono::milliseconds(200);
 constexpr auto kHeartbeatPeriod = std::chrono::seconds(1);
 constexpr auto kAttitudeLogPeriod = std::chrono::milliseconds(100);  // 10 Hz
 constexpr int kGyroCalibrationSamples = 200;
 constexpr auto kGyroCalibrationSamplePeriod = std::chrono::milliseconds(10);
+constexpr const char* kDefaultIbusDevice = "/dev/ttyS1";
 
 // PID bench test gains (estimate for 250mm quad, tune before flight)
 // These map attitude error (deg) → motor correction (us)
@@ -61,36 +61,33 @@ bool rcChannelsSane(const drone::protocol::RcData& rc) {
     }
 
     for (const int channel : rc.channels) {
-        if (channel < 900 || channel > 2100) {
+        if (channel < drone::ibus::kMinChannelValue || channel > drone::ibus::kMaxChannelValue) {
             return false;
         }
     }
     return true;
 }
 
-int parseBaudrate(const char* text, int fallback) {
-    if (text == nullptr) {
-        return fallback;
+float normStick(std::uint16_t value) {
+    float x = (static_cast<float>(value) - 1500.0f) / 500.0f;
+    if (x > 1.0f) {
+        x = 1.0f;
     }
-
-    char* end = nullptr;
-    const long value = std::strtol(text, &end, 10);
-    if (end == text || *end != '\0' || value <= 0) {
-        return fallback;
+    if (x < -1.0f) {
+        x = -1.0f;
     }
-    return static_cast<int>(value);
+    return x;
 }
 
-void sendSafeStop(drone::SerialPort& serial) {
-    const std::array<int, 4> stop_motors {
-        drone::protocol::kPwmMinUs,
-        drone::protocol::kPwmMinUs,
-        drone::protocol::kPwmMinUs,
-        drone::protocol::kPwmMinUs,
-    };
-
-    serial.writeLine(drone::protocol::encodeDisarmLine());
-    serial.writeLine(drone::protocol::encodeMotLine(stop_motors));
+float normThrottle(std::uint16_t value) {
+    float x = (static_cast<float>(value) - 1000.0f) / 1000.0f;
+    if (x > 1.0f) {
+        x = 1.0f;
+    }
+    if (x < 0.0f) {
+        x = 0.0f;
+    }
+    return x;
 }
 
 GyroBias calibrateGyroBias(drone::Mpu6050& imu) {
@@ -129,29 +126,24 @@ GyroBias calibrateGyroBias(drone::Mpu6050& imu) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <uart_device> [baudrate]\n"
-                  << "Example: " << argv[0] << " /dev/ttyS1 115200\n";
-        return 2;
-    }
-
-    const std::string uart_device = argv[1];
-    const int baudrate = (argc >= 3) ? parseBaudrate(argv[2], 115200) : 115200;
-
+    std::string ibus_device = kDefaultIbusDevice;
     bool test_pid = false;
+    bool ibus_device_set = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--test-pid") {
             test_pid = true;
-            break;
+        } else if (!ibus_device_set) {
+            ibus_device = argv[i];
+            ibus_device_set = true;
         }
     }
 
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
-    drone::SerialPort serial;
-    if (!serial.open(uart_device, baudrate)) {
-        std::cerr << "Failed to open UART: " << serial.lastError() << "\n";
+    drone::IBusReceiver ibus_receiver;
+    if (!ibus_receiver.open(ibus_device.c_str())) {
+        std::cerr << "Failed to open iBUS UART " << ibus_device << ": " << ibus_receiver.lastError() << "\n";
         return 1;
     }
 
@@ -193,11 +185,10 @@ int main(int argc, char* argv[]) {
     auto last_loop_time = std::chrono::steady_clock::now();
     auto next_heartbeat = last_loop_time + kHeartbeatPeriod;
     auto next_attitude_log = last_loop_time + kAttitudeLogPeriod;
-    auto next_serial_warning = last_loop_time;
 
     std::cout << "Milk-V Duo 256 drone controller skeleton started at " << kMainLoopHz << " Hz\n"
-              << "Safety notice: bench-test without propellers installed. Milk-V sends UART targets only;\n"
-              << "STM32 must own ESC PWM generation, timeout failsafe, and emergency motor stop.\n";
+              << "iBUS input: " << ibus_device << " (GP3/UART1_RX, 115200 8N1 raw)\n"
+              << "Safety notice: bench-test without propellers installed. RC failsafe disarms within 200 ms.\n";
 
     if (test_pid) {
         std::cout << "=== PID TEST MODE ===\n"
@@ -215,16 +206,14 @@ int main(int argc, char* argv[]) {
     while (g_running) {
         const auto now = std::chrono::steady_clock::now();
 
-        for (const auto& line : serial.readLines()) {
-            drone::protocol::RcData parsed_rc;
-            drone::protocol::BatteryData parsed_battery;
-
-            if (drone::protocol::parseRcLine(line, parsed_rc)) {
-                rc = parsed_rc;
-                last_rc_time = now;
-            } else if (drone::protocol::parseBatteryLine(line, parsed_battery)) {
-                battery = parsed_battery;
+        drone::IBusChannels ibus_channels;
+        while (ibus_receiver.readFrame(ibus_channels)) {
+            for (std::size_t i = 0; i < rc.channels.size(); ++i) {
+                rc.channels[i] = static_cast<int>(ibus_channels.ch[i]);
             }
+            rc.failsafe = false;
+            rc.valid = true;
+            last_rc_time = now;
         }
 
         double dt_s = std::chrono::duration<double>(now - last_loop_time).count();
@@ -253,17 +242,24 @@ int main(int argc, char* argv[]) {
             low_voltage_latched = true;
         }
 
-        const bool battery_ok = battery.valid && !low_voltage_latched && battery.voltage_mv >= kLowVoltageMv;
+        const bool battery_ok = !low_voltage_latched && (!battery.valid || battery.voltage_mv >= kLowVoltageMv);
         const bool imu_valid = !invalid_imu_safety;
         const bool throttle_low = rc_fresh && rc.channels[2] <= kThrottleLowUs;
 
-        // Channel 5 is treated as the arm switch for this skeleton.
-        const bool arm_requested = rc_fresh && rc.channels[4] >= kArmSwitchHighUs;
-        const bool disarm_switch = rc_fresh && rc.channels[4] <= kArmSwitchLowUs;
+        float roll_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[0])) : 0.0f;
+        float pitch_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[1])) : 0.0f;
+        float throttle_cmd = rc_fresh ? normThrottle(static_cast<std::uint16_t>(rc.channels[2])) : 0.0f;
+        float yaw_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[3])) : 0.0f;
+        const bool armed_switch = rc_fresh && rc.channels[4] > kSwitchThresholdUs;
+        const bool mode_switch = rc_fresh && rc.channels[5] > kSwitchThresholdUs;
 
-        if (rc_failsafe || !battery_ok || invalid_imu_safety || disarm_switch) {
+        if (rc_failsafe || !battery_ok || invalid_imu_safety || !armed_switch) {
             armed = false;
-        } else if (!armed && arm_requested && throttle_low) {
+            throttle_cmd = 0.0f;
+            roll_cmd = 0.0f;
+            pitch_cmd = 0.0f;
+            yaw_cmd = 0.0f;
+        } else if (!armed && armed_switch && throttle_low) {
             armed = true;
         }
 
@@ -296,19 +292,6 @@ int main(int argc, char* argv[]) {
                 drone::protocol::kPwmMinUs,
             };
 
-        bool write_ok = true;
-        if (armed) {
-            write_ok = serial.writeLine(drone::protocol::encodeArmLine()) && write_ok;
-        } else {
-            write_ok = serial.writeLine(drone::protocol::encodeDisarmLine()) && write_ok;
-        }
-        write_ok = serial.writeLine(drone::protocol::encodeMotLine(motors)) && write_ok;
-
-        if (!write_ok && now >= next_serial_warning) {
-            std::cerr << "UART write warning: " << serial.lastError() << "\n";
-            next_serial_warning = now + kHeartbeatPeriod;
-        }
-
         if (now >= next_attitude_log) {
             std::cout << std::fixed << std::setprecision(3)
                       << "attitude"
@@ -325,6 +308,8 @@ int main(int argc, char* argv[]) {
                       << " pid_r=" << pid_roll_out
                       << " pid_p=" << pid_pitch_out
                       << " pid_y=" << pid_yaw_out
+                      << " rc_cmd=[" << roll_cmd << ',' << pitch_cmd << ','
+                      << throttle_cmd << ',' << yaw_cmd << ']'
                       << " mx=[" << mixed_motors.m1 << ',' << mixed_motors.m2 << ','
                       << mixed_motors.m3 << ',' << mixed_motors.m4 << "]\n";
             next_attitude_log += kAttitudeLogPeriod;
@@ -340,6 +325,12 @@ int main(int argc, char* argv[]) {
                       << " low_voltage=" << (low_voltage_latched ? 1 : 0)
                       << " imu_valid=" << (imu_valid ? 1 : 0)
                       << " invalid_imu=" << (invalid_imu_safety ? 1 : 0)
+                      << " rc_ch=[" << rc.channels[0] << ',' << rc.channels[1] << ','
+                      << rc.channels[2] << ',' << rc.channels[3] << ','
+                      << rc.channels[4] << ',' << rc.channels[5] << ']'
+                      << " cmd=[" << roll_cmd << ',' << pitch_cmd << ','
+                      << throttle_cmd << ',' << yaw_cmd << ']'
+                      << " mode=" << (mode_switch ? 1 : 0)
                       << " roll=" << attitude.roll_deg
                       << " pitch=" << attitude.pitch_deg
                       << " yaw=" << attitude.yaw_deg
@@ -351,10 +342,7 @@ int main(int argc, char* argv[]) {
         loop_rate.sleep();
     }
 
-    for (int i = 0; i < 3; ++i) {
-        sendSafeStop(serial);
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
+    ibus_receiver.close();
 
     return 0;
 }
