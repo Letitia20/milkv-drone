@@ -1,8 +1,9 @@
 #include "complementary_filter.hpp"
+#include "esc_pwm_sysfs.hpp"
 #include "ibus_receiver.hpp"
 #include "imu_mpu6050.hpp"
 #include "loop_rate.hpp"
-#include "motor_mixer.hpp"
+#include "motor_output_logic.hpp"
 #include "pid.hpp"
 #include "protocol.hpp"
 
@@ -123,15 +124,34 @@ GyroBias calibrateGyroBias(drone::Mpu6050& imu) {
     return bias;
 }
 
+bool writeMotorsToEsc(drone::EscPwmSysfs& esc_pwm, const std::array<int, 4>& motors) {
+    bool ok = true;
+    ok = esc_pwm.setEscUs(1, motors[0]) && ok;
+    ok = esc_pwm.setEscUs(2, motors[1]) && ok;
+    ok = esc_pwm.setEscUs(3, motors[2]) && ok;
+    ok = esc_pwm.setEscUs(4, motors[3]) && ok;
+    return ok;
+}
+
+void sleepWhileRunning(std::chrono::milliseconds duration) {
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (g_running && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
     std::string ibus_device = kDefaultIbusDevice;
+    std::string pwm_chip;
     bool test_pid = false;
     bool ibus_device_set = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--test-pid") {
             test_pid = true;
+        } else if (std::string(argv[i]) == "--pwm-chip" && i + 1 < argc) {
+            pwm_chip = argv[++i];
         } else if (!ibus_device_set) {
             ibus_device = argv[i];
             ibus_device_set = true;
@@ -145,6 +165,23 @@ int main(int argc, char* argv[]) {
     if (!ibus_receiver.open(ibus_device.c_str())) {
         std::cerr << "Failed to open iBUS UART " << ibus_device << ": " << ibus_receiver.lastError() << "\n";
         return 1;
+    }
+
+    drone::EscPwmSysfs esc_pwm;
+    if (!esc_pwm.initialize(pwm_chip)) {
+        std::cerr << "Failed to initialize ESC sysfs PWM output: " << esc_pwm.lastError() << "\n";
+        std::cerr << "Run as root and pass --pwm-chip pwmchipX if auto-scan picked the wrong chip.\n";
+        return 1;
+    }
+    std::cout << "ESC sysfs PWM output initialized at 50Hz; all ESCs held at "
+              << drone::kEscPwmMinUs << "us\n";
+    std::cout << "Holding ESCs at low throttle for 5 seconds to arm...\n";
+    sleepWhileRunning(std::chrono::seconds(5));
+    if (!g_running) {
+        esc_pwm.stopAll();
+        esc_pwm.disableAll();
+        ibus_receiver.close();
+        return 0;
     }
 
     drone::Mpu6050 imu;
@@ -173,8 +210,6 @@ int main(int argc, char* argv[]) {
     drone::PID pid_yaw(kTestPidYawKp, kTestPidYawKi, kTestPidYawKd);
     pid_yaw.setIntegralLimit(kPidIntegralLimit);
     pid_yaw.setOutputLimits(-kPidOutputLimit, kPidOutputLimit);
-    drone::MotorMixer mixer;
-
     drone::protocol::RcData rc;
     drone::protocol::BatteryData battery;
     auto last_rc_time = std::chrono::steady_clock::time_point::min();
@@ -267,30 +302,29 @@ int main(int argc, char* argv[]) {
         double pid_roll_out = 0.0;
         double pid_pitch_out = 0.0;
         double pid_yaw_out = 0.0;
-        drone::MotorOutputs mixed_motors;
         if (test_pid && imu_valid) {
             pid_roll_out = pid_roll.update(0.0, attitude.roll_deg, dt_s);
             pid_pitch_out = pid_pitch.update(0.0, attitude.pitch_deg, dt_s);
             pid_yaw_out = pid_yaw.update(0.0, imu_sample.gz_dps, dt_s);
-            mixed_motors = mixer.mix(
-                static_cast<double>(drone::protocol::kPwmMidUs),
-                pid_roll_out,
-                pid_pitch_out,
-                pid_yaw_out);
         }
 
-        // In test_pid mode, send real computed motor values over UART.
-        // Otherwise fall back to 1000us (safe stop).
-        // SAFETY: without STM32, UART writes are harmless noise.
-        // With STM32, the coprocessor must still enforce its own failsafe.
-        const std::array<int, 4> motors = (test_pid && imu_valid)
-            ? mixed_motors.asArray()
-            : std::array<int, 4>{
-                drone::protocol::kPwmMinUs,
-                drone::protocol::kPwmMinUs,
-                drone::protocol::kPwmMinUs,
-                drone::protocol::kPwmMinUs,
-            };
+        drone::MotorOutputInput motor_input;
+        motor_input.armed = armed;
+        motor_input.rc_valid = rc_fresh;
+        motor_input.failsafe = rc_failsafe;
+        motor_input.mode = mode_switch;
+        motor_input.throttle = throttle_cmd;
+        motor_input.roll_correction_us = pid_roll_out;
+        motor_input.pitch_correction_us = pid_pitch_out;
+        motor_input.yaw_correction_us = pid_yaw_out;
+        const drone::MotorOutputResult motor_output = drone::computeMotorOutput(motor_input);
+        const std::array<int, 4> motors = motor_output.motors_after_clamp;
+
+        if (!writeMotorsToEsc(esc_pwm, motors)) {
+            std::cerr << "ESC PWM write failed: " << esc_pwm.lastError() << "\n";
+            esc_pwm.stopAll();
+            g_running = false;
+        }
 
         if (now >= next_attitude_log) {
             std::cout << std::fixed << std::setprecision(3)
@@ -310,8 +344,17 @@ int main(int argc, char* argv[]) {
                       << " pid_y=" << pid_yaw_out
                       << " rc_cmd=[" << roll_cmd << ',' << pitch_cmd << ','
                       << throttle_cmd << ',' << yaw_cmd << ']'
-                      << " mx=[" << mixed_motors.m1 << ',' << mixed_motors.m2 << ','
-                      << mixed_motors.m3 << ',' << mixed_motors.m4 << "]\n";
+                      << " base_us=" << motor_output.base_us
+                      << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
+                      << motor_output.mixer_before_clamp[1] << ','
+                      << motor_output.mixer_before_clamp[2] << ','
+                      << motor_output.mixer_before_clamp[3] << ']'
+                      << " motors_after_clamp=[" << motor_output.motors_after_clamp[0] << ','
+                      << motor_output.motors_after_clamp[1] << ','
+                      << motor_output.motors_after_clamp[2] << ','
+                      << motor_output.motors_after_clamp[3] << ']'
+                      << " motor_output_enabled_reason="
+                      << motor_output.motor_output_enabled_reason << "\n";
             next_attitude_log += kAttitudeLogPeriod;
         }
 
@@ -331,6 +374,18 @@ int main(int argc, char* argv[]) {
                       << " cmd=[" << roll_cmd << ',' << pitch_cmd << ','
                       << throttle_cmd << ',' << yaw_cmd << ']'
                       << " mode=" << (mode_switch ? 1 : 0)
+                      << " throttle=" << throttle_cmd
+                      << " base_us=" << motor_output.base_us
+                      << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
+                      << motor_output.mixer_before_clamp[1] << ','
+                      << motor_output.mixer_before_clamp[2] << ','
+                      << motor_output.mixer_before_clamp[3] << ']'
+                      << " motors_after_clamp=[" << motor_output.motors_after_clamp[0] << ','
+                      << motor_output.motors_after_clamp[1] << ','
+                      << motor_output.motors_after_clamp[2] << ','
+                      << motor_output.motors_after_clamp[3] << ']'
+                      << " motor_output_enabled_reason="
+                      << motor_output.motor_output_enabled_reason
                       << " roll=" << attitude.roll_deg
                       << " pitch=" << attitude.pitch_deg
                       << " yaw=" << attitude.yaw_deg
@@ -342,6 +397,8 @@ int main(int argc, char* argv[]) {
         loop_rate.sleep();
     }
 
+    esc_pwm.stopAll();
+    esc_pwm.disableAll();
     ibus_receiver.close();
 
     return 0;
