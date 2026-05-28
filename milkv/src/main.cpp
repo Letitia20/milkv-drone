@@ -1,5 +1,6 @@
 #include "complementary_filter.hpp"
 #include "esc_pwm_sysfs.hpp"
+#include "flight_control.hpp"
 #include "ibus_receiver.hpp"
 #include "imu_mpu6050.hpp"
 #include "loop_rate.hpp"
@@ -67,28 +68,6 @@ bool rcChannelsSane(const drone::protocol::RcData& rc) {
         }
     }
     return true;
-}
-
-float normStick(std::uint16_t value) {
-    float x = (static_cast<float>(value) - 1500.0f) / 500.0f;
-    if (x > 1.0f) {
-        x = 1.0f;
-    }
-    if (x < -1.0f) {
-        x = -1.0f;
-    }
-    return x;
-}
-
-float normThrottle(std::uint16_t value) {
-    float x = (static_cast<float>(value) - 1000.0f) / 1000.0f;
-    if (x > 1.0f) {
-        x = 1.0f;
-    }
-    if (x < 0.0f) {
-        x = 0.0f;
-    }
-    return x;
 }
 
 GyroBias calibrateGyroBias(drone::Mpu6050& imu) {
@@ -199,8 +178,9 @@ int main(int argc, char* argv[]) {
 
     drone::ComplementaryFilter filter;
     drone::LoopRate loop_rate(kMainLoopHz);
+    drone::FlightControlConfig flight_config;
 
-    // PID controllers for bench testing
+    // Conservative starter gains; tune with propellers removed before flight.
     drone::PID pid_roll(kTestPidRollKp, kTestPidRollKi, kTestPidRollKd);
     pid_roll.setIntegralLimit(kPidIntegralLimit);
     pid_roll.setOutputLimits(-kPidOutputLimit, kPidOutputLimit);
@@ -227,15 +207,14 @@ int main(int argc, char* argv[]) {
 
     if (test_pid) {
         std::cout << "=== PID TEST MODE ===\n"
-                  << "Target: roll=0 deg, pitch=0 deg, yaw rate=0 dps\n"
+                  << "Target: RC roll/pitch attitude and yaw rate commands are active\n"
                   << "Gains: roll kp=" << kTestPidRollKp << " ki=" << kTestPidRollKi
                   << " kd=" << kTestPidRollKd << "\n"
                   << "       pitch kp=" << kTestPidPitchKp << " ki=" << kTestPidPitchKi
                   << " kd=" << kTestPidPitchKd << "\n"
                   << "       yaw kp=" << kTestPidYawKp << " ki=" << kTestPidYawKi
                   << " kd=" << kTestPidYawKd << "\n"
-                  << "Motors LOCKED at " << drone::protocol::kPwmMinUs << "us (safe).\n"
-                  << "Tilt the board to see PID corrections.\n";
+                  << "Keep propellers removed; tilt the board and move sticks to see PID corrections.\n";
     }
 
     while (g_running) {
@@ -281,31 +260,35 @@ int main(int argc, char* argv[]) {
         const bool imu_valid = !invalid_imu_safety;
         const bool throttle_low = rc_fresh && rc.channels[2] <= kThrottleLowUs;
 
-        float roll_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[0])) : 0.0f;
-        float pitch_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[1])) : 0.0f;
-        float throttle_cmd = rc_fresh ? normThrottle(static_cast<std::uint16_t>(rc.channels[2])) : 0.0f;
-        float yaw_cmd = rc_fresh ? normStick(static_cast<std::uint16_t>(rc.channels[3])) : 0.0f;
+        drone::PilotCommand pilot_command;
+        if (rc_fresh) {
+            pilot_command = drone::makePilotCommand(rc.channels[0],
+                                                    rc.channels[1],
+                                                    rc.channels[2],
+                                                    rc.channels[3],
+                                                    flight_config);
+        }
         const bool armed_switch = rc_fresh && rc.channels[4] > kSwitchThresholdUs;
         const bool mode_switch = rc_fresh && rc.channels[5] > kSwitchThresholdUs;
 
         if (rc_failsafe || !battery_ok || invalid_imu_safety || !armed_switch) {
             armed = false;
-            throttle_cmd = 0.0f;
-            roll_cmd = 0.0f;
-            pitch_cmd = 0.0f;
-            yaw_cmd = 0.0f;
+            pilot_command = {};
         } else if (!armed && armed_switch && throttle_low) {
             armed = true;
         }
 
-        // PID test mode: compute corrections from attitude error
         double pid_roll_out = 0.0;
         double pid_pitch_out = 0.0;
         double pid_yaw_out = 0.0;
-        if (test_pid && imu_valid) {
-            pid_roll_out = pid_roll.update(0.0, attitude.roll_deg, dt_s);
-            pid_pitch_out = pid_pitch.update(0.0, attitude.pitch_deg, dt_s);
-            pid_yaw_out = pid_yaw.update(0.0, imu_sample.gz_dps, dt_s);
+        if (armed && rc_fresh && imu_valid) {
+            pid_roll_out = pid_roll.update(pilot_command.roll_target_deg, attitude.roll_deg, dt_s);
+            pid_pitch_out = pid_pitch.update(pilot_command.pitch_target_deg, attitude.pitch_deg, dt_s);
+            pid_yaw_out = pid_yaw.update(pilot_command.yaw_rate_target_dps, imu_sample.gz_dps, dt_s);
+        } else {
+            pid_roll.reset();
+            pid_pitch.reset();
+            pid_yaw.reset();
         }
 
         drone::MotorOutputInput motor_input;
@@ -313,7 +296,7 @@ int main(int argc, char* argv[]) {
         motor_input.rc_valid = rc_fresh;
         motor_input.failsafe = rc_failsafe;
         motor_input.mode = mode_switch;
-        motor_input.throttle = throttle_cmd;
+        motor_input.throttle = pilot_command.throttle;
         motor_input.roll_correction_us = pid_roll_out;
         motor_input.pitch_correction_us = pid_pitch_out;
         motor_input.yaw_correction_us = pid_yaw_out;
@@ -342,8 +325,11 @@ int main(int argc, char* argv[]) {
                       << " pid_r=" << pid_roll_out
                       << " pid_p=" << pid_pitch_out
                       << " pid_y=" << pid_yaw_out
-                      << " rc_cmd=[" << roll_cmd << ',' << pitch_cmd << ','
-                      << throttle_cmd << ',' << yaw_cmd << ']'
+                      << " rc_cmd=[" << pilot_command.roll_stick << ',' << pilot_command.pitch_stick << ','
+                      << pilot_command.throttle << ',' << pilot_command.yaw_stick << ']'
+                      << " targets=[roll_deg=" << pilot_command.roll_target_deg
+                      << ",pitch_deg=" << pilot_command.pitch_target_deg
+                      << ",yaw_rate_dps=" << pilot_command.yaw_rate_target_dps << ']'
                       << " base_us=" << motor_output.base_us
                       << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
                       << motor_output.mixer_before_clamp[1] << ','
@@ -371,10 +357,13 @@ int main(int argc, char* argv[]) {
                       << " rc_ch=[" << rc.channels[0] << ',' << rc.channels[1] << ','
                       << rc.channels[2] << ',' << rc.channels[3] << ','
                       << rc.channels[4] << ',' << rc.channels[5] << ']'
-                      << " cmd=[" << roll_cmd << ',' << pitch_cmd << ','
-                      << throttle_cmd << ',' << yaw_cmd << ']'
+                      << " cmd=[" << pilot_command.roll_stick << ',' << pilot_command.pitch_stick << ','
+                      << pilot_command.throttle << ',' << pilot_command.yaw_stick << ']'
+                      << " targets=[roll_deg=" << pilot_command.roll_target_deg
+                      << ",pitch_deg=" << pilot_command.pitch_target_deg
+                      << ",yaw_rate_dps=" << pilot_command.yaw_rate_target_dps << ']'
                       << " mode=" << (mode_switch ? 1 : 0)
-                      << " throttle=" << throttle_cmd
+                      << " throttle=" << pilot_command.throttle
                       << " base_us=" << motor_output.base_us
                       << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
                       << motor_output.mixer_before_clamp[1] << ','

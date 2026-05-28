@@ -28,6 +28,8 @@ Implemented on the Milk-V side:
   `0x68` and `0x69`; `WHO_AM_I` accepts `0x68` or observed ID value `0x70`.
 - Complementary filter attitude estimation.
 - Gyro bias calibration on startup: 200 samples, 10 ms interval.
+- RC stick deadband and softened throttle curve.
+- RC roll/pitch/yaw commands feed the three-axis PID control path.
 - 10 Hz attitude and IMU telemetry log output.
 - PID class.
 - X-layout quad motor mixer.
@@ -304,8 +306,8 @@ Suggested next development order:
 1. Verify GP10/GP11 IIC2 pinmux and run `mpu_test` on `/dev/i2c-2 0x68`.
 2. Bench-test `milkv_drone` gyro calibration and 10 Hz attitude logging without propellers.
 3. Install autostart and confirm reboot starts `milkv_drone` without USB commands.
-4. Add throttle curve and RC deadband.
-5. Tune three-axis PID outputs into the X-layout motor mixer.
+4. Tune RC deadband, throttle curve, and three-axis PID gains on the real airframe.
+5. Keep validating three-axis PID outputs through the X-layout motor mixer.
 6. Keep motor output capped during early no-prop bench tests.
 7. Add telemetry for IMU, attitude, RC, battery, arm state, and safety reason.
 8. Only after repeated no-prop tests, prepare a cautious tethered test.

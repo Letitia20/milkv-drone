@@ -6,6 +6,8 @@ BUILD_DIR := build/duo-riscv64
 HOST_BUILD_DIR := build/host-tests
 HOST_CXX ?= g++
 HOST_AUTOSTART_TEST := $(HOST_BUILD_DIR)/autostart_script_test.exe
+HOST_FLIGHT_CONTROL_TEST := $(HOST_BUILD_DIR)/flight_control_test.exe
+HOST_TESTS := $(HOST_AUTOSTART_TEST) $(HOST_FLIGHT_CONTROL_TEST)
 USE_RT ?= 0
 
 ifneq ($(filter host-test,$(MAKECMDGOALS)),host-test)
@@ -75,11 +77,15 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $@
 
-host-test: $(HOST_AUTOSTART_TEST)
+host-test: $(HOST_TESTS)
 	./$(HOST_AUTOSTART_TEST)
+	./$(HOST_FLIGHT_CONTROL_TEST)
 
 $(HOST_AUTOSTART_TEST): tests/autostart_script_test.cpp | $(HOST_BUILD_DIR)
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) $< -o $@
+
+$(HOST_FLIGHT_CONTROL_TEST): tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp $(SRC_DIR)/flight_control.hpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp -o $@
 
 $(HOST_BUILD_DIR):
 	mkdir -p $@
