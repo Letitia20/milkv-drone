@@ -153,7 +153,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     std::cout << "ESC sysfs PWM output initialized at 50Hz; all ESCs held at "
-              << drone::kEscPwmMinUs << "us\n";
+              << drone::kEscPwmMinUs << "us; motor_max_us=" << drone::kMotorMaxUs << "\n";
     std::cout << "Holding ESCs at low throttle for 5 seconds to arm...\n";
     sleepWhileRunning(std::chrono::seconds(5));
     if (!g_running) {
@@ -364,6 +364,7 @@ int main(int argc, char* argv[]) {
                       << ",yaw_rate_dps=" << pilot_command.yaw_rate_target_dps << ']'
                       << " mode=" << (mode_switch ? 1 : 0)
                       << " throttle=" << pilot_command.throttle
+                      << " motor_max_us=" << drone::kMotorMaxUs
                       << " base_us=" << motor_output.base_us
                       << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
                       << motor_output.mixer_before_clamp[1] << ','

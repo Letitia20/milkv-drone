@@ -9,10 +9,8 @@
 namespace drone {
 namespace {
 
-constexpr int kBenchMaxPwmUs = 1200;
-
 int clampBenchPwm(int value) {
-    return std::clamp(value, protocol::kPwmMinUs, kBenchMaxPwmUs);
+    return std::clamp(value, protocol::kPwmMinUs, kMotorMaxUs);
 }
 
 int throttleToBaseUs(float throttle) {

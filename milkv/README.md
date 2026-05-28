@@ -44,7 +44,7 @@ Current safety behavior:
 - ESC output stays at `1000us` unless RC is fresh, failsafe is clear, IMU is
   valid, voltage safety has not latched, channel 5 is high, and throttle was low
   before arming.
-- Motor output is capped at `1200us` for bench-limited bring-up.
+- Motor output is capped at `1800us`.
 - Startup only makes the controller ready for remote arming; it does not
   automatically arm or take off.
 

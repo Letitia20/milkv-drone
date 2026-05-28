@@ -5,6 +5,8 @@
 
 namespace drone {
 
+constexpr int kMotorMaxUs = 1800;
+
 struct MotorOutputInput {
     bool armed {false};
     bool rc_valid {false};
