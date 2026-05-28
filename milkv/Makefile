@@ -3,8 +3,12 @@ MPU_TEST_TARGET := mpu_test
 IBUS_READ_TARGET := ibus_read
 SRC_DIR := src
 BUILD_DIR := build/duo-riscv64
+HOST_BUILD_DIR := build/host-tests
+HOST_CXX ?= g++
+HOST_AUTOSTART_TEST := $(HOST_BUILD_DIR)/autostart_script_test.exe
 USE_RT ?= 0
 
+ifneq ($(filter host-test,$(MAKECMDGOALS)),host-test)
 ifeq ($(strip $(TOOLCHAIN_PREFIX)),)
 $(error TOOLCHAIN_PREFIX is not set. Run "source /path/to/duo-examples/envsetup.sh" and select Product=2, Arch=2)
 endif
@@ -27,6 +31,7 @@ endif
 
 ifeq (,$(findstring riscv64-unknown-linux-musl-,$(TOOLCHAIN_PREFIX)))
 $(error TOOLCHAIN_PREFIX must point to Milk-V RISCV64 musl toolchain from duo-examples; got "$(TOOLCHAIN_PREFIX)")
+endif
 endif
 
 override CC := $(TOOLCHAIN_PREFIX)gcc
@@ -51,7 +56,7 @@ ifeq ($(USE_RT),1)
 LDLIBS += -lrt
 endif
 
-.PHONY: all clean print-toolchain
+.PHONY: all clean print-toolchain host-test
 
 all: $(TARGET) $(MPU_TEST_TARGET) $(IBUS_READ_TARGET)
 
@@ -68,6 +73,15 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
+	mkdir -p $@
+
+host-test: $(HOST_AUTOSTART_TEST)
+	./$(HOST_AUTOSTART_TEST)
+
+$(HOST_AUTOSTART_TEST): tests/autostart_script_test.cpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) $< -o $@
+
+$(HOST_BUILD_DIR):
 	mkdir -p $@
 
 print-toolchain:

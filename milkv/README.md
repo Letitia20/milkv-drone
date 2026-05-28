@@ -2,18 +2,18 @@
 
 Milk-V Duo 256M / SG2002 based drone controller project.
 
-This repository contains the Milk-V side C++17 controller skeleton. The intended
-flight-control architecture is:
+This repository contains the Milk-V side C++17 controller. The current runtime
+architecture is Milk-V-only:
 
 ```text
-Milk-V Duo 256M: main controller, IMU, filter, PID, motor mixing, telemetry
-STM32F103: realtime ESC PWM, iBUS receiver, emergency stop, failsafe
+Milk-V Duo 256M: controller, iBUS receiver input, IMU, filter, PID, motor mixing,
+                 ESC PWM output, telemetry log, startup script
 ```
 
-The Milk-V board is still the main controller required by the assignment. The
-STM32 is used as a realtime safety and IO coprocessor because Linux is not a
-hard-realtime PWM source. Do not drive the ESCs directly from Milk-V as the only
-safety mechanism.
+The previous STM32 coprocessor path is not required for this setup. Because
+Linux is not a hard-realtime flight controller, keep early tests conservative:
+remove propellers for software checks, keep the bench PWM cap in place, and use
+a physical power cutoff during bring-up.
 
 ## Current Status
 
@@ -21,9 +21,9 @@ Implemented on the Milk-V side:
 
 - C++17 codebase with multiple `src/*.cpp` and `src/*.hpp` files.
 - 100 Hz main loop.
-- UART communication with the STM32 side.
-- RC and battery telemetry parsing.
-- `ARM`, `DISARM`, and motor command encoding.
+- Direct iBUS receiver input on `/dev/ttyS1`.
+- Direct sysfs PWM output for four ESCs.
+- RC parsing, arm switch handling, throttle-low arming gate, and failsafe logic.
 - MPU6050 Linux I2C interface on `/dev/i2c-2` with I2C address support for
   `0x68` and `0x69`; `WHO_AM_I` accepts `0x68` or observed ID value `0x70`.
 - Complementary filter attitude estimation.
@@ -31,41 +31,43 @@ Implemented on the Milk-V side:
 - 10 Hz attitude and IMU telemetry log output.
 - PID class.
 - X-layout quad motor mixer.
-- Safety state skeleton: RC timeout, failsafe flag, low voltage latch, invalid
-  IMU state, disarm switch, and safe-stop on exit.
+- Safety state: RC timeout, failsafe flag, low voltage latch, invalid IMU state,
+  disarm switch, throttle-low arm gate, and safe-stop on exit.
+- Milk-V boot autostart installer for `/mnt/system/auto.sh`.
 - Makefile build using the official Milk-V `duo-examples/envsetup.sh`
   environment.
 
 Current safety behavior:
 
-- Motor output is intentionally fixed at `1000us` in this skeleton.
-- The program still sends `ARM` / `DISARM` state to exercise the UART protocol.
-- Real throttle, PID output, and motor mixing are still not connected to motor
-  output and must stay disabled until bench tests pass without propellers.
+- ESC output stays at `1000us` unless RC is fresh, failsafe is clear, IMU is
+  valid, voltage safety has not latched, channel 5 is high, and throttle was low
+  before arming.
+- Motor output is capped at `1200us` for bench-limited bring-up.
+- Startup only makes the controller ready for remote arming; it does not
+  automatically arm or take off.
 
 ## Hardware Architecture
 
-Recommended system wiring:
+Milk-V-only system wiring:
 
 ```text
 3S battery XT60 -> PDB
 PDB -> four ESC power inputs
-PDB 5V -> STM32F103 + IA6B receiver
+PDB or external 5V BEC -> IA6B receiver
 External 5V BEC -> Milk-V Duo 256M + camera + USB WiFi
-Milk-V UART -> STM32 USART
-IA6B iBUS -> STM32 UART RX
-STM32 timer PWM pins -> four ESC signal pins
+IA6B iBUS -> Milk-V GP3 / UART1_RX
+Milk-V PWM pins -> four ESC signal pins
 MPU6050 / BMP280 / OLED -> Milk-V I2C
-DHT22 or status IO -> Milk-V GPIO
-Battery divider -> STM32 ADC
+Optional battery divider -> verified Milk-V ADC-capable input
 All signal grounds -> common ground
 ```
 
 Important safety rules:
 
 - Remove propellers during all software, UART, PWM, and bench tests.
-- STM32 must independently stop all ESC outputs at `1000us` if Milk-V dies,
-  UART messages stop, the receiver failsafes, or the emergency switch is active.
+- Do not install propellers until boot autostart, RC failsafe, arm/disarm, and
+  low-throttle behavior have all been checked repeatedly.
+- Keep a physical battery disconnect available during every powered test.
 - Do not connect battery voltage directly to ADC pins. Use a verified resistor
   divider and common ground.
 - Do not power Milk-V, camera, and WiFi from an overloaded PDB 5V rail. Use an
@@ -129,22 +131,7 @@ duo-pinmux -w GP11/IIC2_SCL
 Only use those commands after confirming the names with `duo-pinmux -l` on the
 actual board image.
 
-## UART Protocol
-
-Milk-V sends commands to STM32:
-
-```text
-ARM\n
-DISARM\n
-MOT,<m1_us>,<m2_us>,<m3_us>,<m4_us>\n
-```
-
-STM32 sends telemetry to Milk-V:
-
-```text
-RC,<ch1>,<ch2>,<ch3>,<ch4>,<ch5>,<ch6>,<failsafe>\n
-BAT,<voltage_mv>\n
-```
+## RC Input And Safety
 
 PWM values are clamped to:
 
@@ -154,13 +141,13 @@ middle:  1500us
 maximum: 2000us
 ```
 
-The current Milk-V program treats channel 5 as the arm switch:
+The current Milk-V-only program treats channel 5 as the arm switch:
 
 ```text
 arm request:    ch5 >= 1800
 disarm request: ch5 <= 1200
 throttle low:   ch3 <= 1100
-RC timeout:     500 ms
+RC timeout:     200 ms
 low voltage:    < 9600 mV
 ```
 
@@ -220,7 +207,7 @@ The Makefile checks that:
 Upload to Milk-V over USB Ethernet:
 
 ```sh
-scp milkv_drone mpu_test root@192.168.42.1:/root/
+scp milkv_drone mpu_test setup_esc_pwm.sh install_autostart.sh root@192.168.42.1:/root/
 ```
 
 Log in and run:
@@ -228,7 +215,7 @@ Log in and run:
 ```sh
 ssh root@192.168.42.1
 chmod +x /root/milkv_drone
-/root/milkv_drone <uart_device> [baudrate]
+/root/milkv_drone [ibus_device] [baudrate]
 ```
 
 Example:
@@ -247,7 +234,8 @@ Current `milkv_drone` IMU behavior:
 - prints calibrated gx/gy/gz bias
 - runs the complementary filter at 100 Hz with real dt_s
 - prints attitude + raw accel/gyro log at 10 Hz
-- keeps MOT fixed at 1000,1000,1000,1000
+- writes ESC PWM directly and keeps outputs at 1000us until all arm conditions
+  are true
 ```
 
 Before connecting PID or motor output, run the standalone MPU6050 bring-up test:
@@ -274,28 +262,23 @@ milkv
 
 ## Autostart
 
-After bench testing, the program can be started from Milk-V's system startup
-script:
+After bench testing without propellers, install Milk-V boot autostart:
 
 ```sh
-vi /mnt/system/auto.sh
-```
-
-Add a line like:
-
-```sh
-/root/milkv_drone /dev/ttyS1 115200 &
-```
-
-Then:
-
-```sh
-chmod +x /mnt/system/auto.sh
+chmod +x /root/install_autostart.sh
+sh /root/install_autostart.sh
 reboot
 ```
 
-Do not enable autostart until safe-stop behavior has been verified on the bench
-without propellers.
+Optional overrides at install time:
+
+```sh
+IBUS_DEVICE=/dev/ttyS1 BAUDRATE=115200 PWM_CHIP=pwmchip4 sh /root/install_autostart.sh
+```
+
+The installer writes `/mnt/system/auto.sh`. On each boot, it runs
+`/root/setup_esc_pwm.sh` when present, starts `/root/milkv_drone`, and appends
+logs to `/root/milkv_drone.log`.
 
 ## Bench Test Checklist
 
@@ -304,12 +287,12 @@ Run these tests before enabling real motor output:
 ```text
 1. Milk-V boots and the program prints a 100 Hz startup message.
 2. Program exits cleanly on Ctrl-C and sends several safe-stop commands.
-3. STM32 receives DISARM and MOT,1000,1000,1000,1000.
-4. RC telemetry updates once the IA6B receiver is active.
-5. Pulling the receiver signal triggers failsafe on the STM32.
-6. Stopping Milk-V UART messages makes STM32 force all ESC outputs to 1000us.
-7. Low voltage telemetry latches disarm on the Milk-V side.
-8. Arm switch only arms when throttle is low and all safety conditions are true.
+3. ESC PWM stays at `1000us` while disarmed.
+4. RC channel values update once the IA6B receiver is active.
+5. Pulling the receiver signal triggers failsafe and forces all ESC outputs to `1000us`.
+6. Channel 5 arms only when throttle is low and all safety conditions are true.
+7. Low voltage telemetry latches disarm when battery sensing is valid.
+8. After installing autostart, rebooting Milk-V starts `milkv_drone` without a USB command session.
 9. No propellers are installed during every test above.
 ```
 
@@ -320,10 +303,10 @@ Suggested next development order:
 ```text
 1. Verify GP10/GP11 IIC2 pinmux and run `mpu_test` on `/dev/i2c-2 0x68`.
 2. Bench-test `milkv_drone` gyro calibration and 10 Hz attitude logging without propellers.
-3. Implement STM32 firmware: iBUS RX, ESC PWM, UART parser, independent failsafe.
+3. Install autostart and confirm reboot starts `milkv_drone` without USB commands.
 4. Add throttle curve and RC deadband.
-5. Feed three-axis PID outputs into the X-layout motor mixer.
-6. Keep motor output capped or fixed during early no-prop bench tests.
+5. Tune three-axis PID outputs into the X-layout motor mixer.
+6. Keep motor output capped during early no-prop bench tests.
 7. Add telemetry for IMU, attitude, RC, battery, arm state, and safety reason.
 8. Only after repeated no-prop tests, prepare a cautious tethered test.
 ```
