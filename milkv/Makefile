@@ -7,7 +7,8 @@ HOST_BUILD_DIR := build/host-tests
 HOST_CXX ?= g++
 HOST_AUTOSTART_TEST := $(HOST_BUILD_DIR)/autostart_script_test.exe
 HOST_FLIGHT_CONTROL_TEST := $(HOST_BUILD_DIR)/flight_control_test.exe
-HOST_TESTS := $(HOST_AUTOSTART_TEST) $(HOST_FLIGHT_CONTROL_TEST)
+HOST_MOTOR_OUTPUT_LOGIC_TEST := $(HOST_BUILD_DIR)/motor_output_logic_test.exe
+HOST_TESTS := $(HOST_AUTOSTART_TEST) $(HOST_FLIGHT_CONTROL_TEST) $(HOST_MOTOR_OUTPUT_LOGIC_TEST)
 USE_RT ?= 0
 
 ifneq ($(filter host-test,$(MAKECMDGOALS)),host-test)
@@ -80,12 +81,16 @@ $(BUILD_DIR):
 host-test: $(HOST_TESTS)
 	./$(HOST_AUTOSTART_TEST)
 	./$(HOST_FLIGHT_CONTROL_TEST)
+	./$(HOST_MOTOR_OUTPUT_LOGIC_TEST)
 
 $(HOST_AUTOSTART_TEST): tests/autostart_script_test.cpp | $(HOST_BUILD_DIR)
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) $< -o $@
 
 $(HOST_FLIGHT_CONTROL_TEST): tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp $(SRC_DIR)/flight_control.hpp | $(HOST_BUILD_DIR)
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp -o $@
+
+$(HOST_MOTOR_OUTPUT_LOGIC_TEST): tests/motor_output_logic_test.cpp $(SRC_DIR)/motor_output_logic.cpp $(SRC_DIR)/motor_output_logic.hpp $(SRC_DIR)/motor_mixer.cpp $(SRC_DIR)/motor_mixer.hpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/motor_output_logic_test.cpp $(SRC_DIR)/motor_output_logic.cpp $(SRC_DIR)/motor_mixer.cpp -o $@
 
 $(HOST_BUILD_DIR):
 	mkdir -p $@

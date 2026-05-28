@@ -30,12 +30,12 @@ int main() {
     input.throttle = 0.39f;
 
     const drone::MotorOutputResult active = drone::computeMotorOutput(input);
-    if (!expectArray(active.motors_after_clamp, {1390, 1390, 1390, 1390},
+    if (!expectArray(active.motors_after_clamp, {1312, 1312, 1312, 1312},
                      "armed throttle output")) {
         return 1;
     }
-    if (active.base_us != 1390) {
-        std::cerr << "base_us expected 1390 got " << active.base_us << "\n";
+    if (active.base_us != 1312) {
+        std::cerr << "base_us expected 1312 got " << active.base_us << "\n";
         return 1;
     }
     if (active.motor_output_enabled_reason != "enabled") {
@@ -43,11 +43,37 @@ int main() {
         return 1;
     }
 
+    input.throttle = 0.8f;
+    input.roll_cmd = 0.5f;
+    input.pitch_cmd = -0.25f;
+    input.yaw_cmd = 0.4f;
+    const drone::MotorOutputResult manual_mix = drone::computeMotorOutput(input);
+    if (manual_mix.base_us != 1640) {
+        std::cerr << "manual mix base_us expected 1640 got " << manual_mix.base_us << "\n";
+        return 1;
+    }
+    if (manual_mix.roll_mix_us != 100 || manual_mix.pitch_mix_us != -50 ||
+        manual_mix.yaw_mix_us != 60) {
+        std::cerr << "manual mix values expected [100,-50,60] got ["
+                  << manual_mix.roll_mix_us << ',' << manual_mix.pitch_mix_us << ','
+                  << manual_mix.yaw_mix_us << "]\n";
+        return 1;
+    }
+    if (!expectArray(manual_mix.mixer_before_clamp, {1630, 1550, 1850, 1530},
+                     "manual mix before clamp")) {
+        return 1;
+    }
+    if (!expectArray(manual_mix.motors_after_clamp, {1630, 1550, 1800, 1530},
+                     "manual mix after clamp")) {
+        return 1;
+    }
+
     input.throttle = 1.0f;
-    input.roll_correction_us = 250.0;
-    input.pitch_correction_us = 250.0;
+    input.roll_cmd = 1.0f;
+    input.pitch_cmd = 1.0f;
+    input.yaw_cmd = 0.0f;
     const drone::MotorOutputResult max_limited = drone::computeMotorOutput(input);
-    if (!expectArray(max_limited.motors_after_clamp, {1800, 1800, 1300, 1800},
+    if (!expectArray(max_limited.motors_after_clamp, {1800, 1800, 1800, 1400},
                      "motor max clamp output")) {
         return 1;
     }
@@ -56,8 +82,9 @@ int main() {
         return 1;
     }
 
-    input.roll_correction_us = 0.0;
-    input.pitch_correction_us = 0.0;
+    input.roll_cmd = 0.0f;
+    input.pitch_cmd = 0.0f;
+    input.yaw_cmd = 0.0f;
     input.throttle = 0.0f;
     const drone::MotorOutputResult zero_throttle = drone::computeMotorOutput(input);
     if (!expectArray(zero_throttle.motors_after_clamp, {1000, 1000, 1000, 1000},
@@ -91,6 +118,23 @@ int main() {
     }
     if (failsafe.motor_output_enabled_reason != "disabled_failsafe") {
         std::cerr << "failsafe reason mismatch: " << failsafe.motor_output_enabled_reason << "\n";
+        return 1;
+    }
+
+    input.failsafe = false;
+    input.invalid_imu = true;
+    input.throttle = 0.8f;
+    input.roll_cmd = 1.0f;
+    input.pitch_cmd = 1.0f;
+    input.yaw_cmd = 1.0f;
+    const drone::MotorOutputResult invalid_imu = drone::computeMotorOutput(input);
+    if (!expectArray(invalid_imu.motors_after_clamp, {1000, 1000, 1000, 1000},
+                     "invalid imu output")) {
+        return 1;
+    }
+    if (invalid_imu.motor_output_enabled_reason != "disabled_invalid_imu") {
+        std::cerr << "invalid imu reason mismatch: "
+                  << invalid_imu.motor_output_enabled_reason << "\n";
         return 1;
     }
 

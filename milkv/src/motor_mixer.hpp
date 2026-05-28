@@ -16,15 +16,12 @@ struct MotorOutputs {
 class MotorMixer {
 public:
     static constexpr int kMinPwmUs = 1000;
-    static constexpr int kMaxPwmUs = 2000;
+    static constexpr int kMaxPwmUs = 1800;
 
     MotorOutputs mix(double throttle_us,
-                     double roll_correction_us,
-                     double pitch_correction_us,
-                     double yaw_correction_us) const;
-
-private:
-    static int clampToPwm(double value);
+                     double roll_mix_us,
+                     double pitch_mix_us,
+                     double yaw_mix_us) const;
 };
 
 }  // namespace drone

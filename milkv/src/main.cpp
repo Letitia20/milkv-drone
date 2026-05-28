@@ -295,11 +295,12 @@ int main(int argc, char* argv[]) {
         motor_input.armed = armed;
         motor_input.rc_valid = rc_fresh;
         motor_input.failsafe = rc_failsafe;
+        motor_input.invalid_imu = invalid_imu_safety;
         motor_input.mode = mode_switch;
         motor_input.throttle = pilot_command.throttle;
-        motor_input.roll_correction_us = pid_roll_out;
-        motor_input.pitch_correction_us = pid_pitch_out;
-        motor_input.yaw_correction_us = pid_yaw_out;
+        motor_input.roll_cmd = pilot_command.roll_stick;
+        motor_input.pitch_cmd = pilot_command.pitch_stick;
+        motor_input.yaw_cmd = pilot_command.yaw_stick;
         const drone::MotorOutputResult motor_output = drone::computeMotorOutput(motor_input);
         const std::array<int, 4> motors = motor_output.motors_after_clamp;
 
@@ -330,7 +331,11 @@ int main(int argc, char* argv[]) {
                       << " targets=[roll_deg=" << pilot_command.roll_target_deg
                       << ",pitch_deg=" << pilot_command.pitch_target_deg
                       << ",yaw_rate_dps=" << pilot_command.yaw_rate_target_dps << ']'
+                      << " motor_max_us=" << motor_output.motor_max_us
                       << " base_us=" << motor_output.base_us
+                      << " roll_mix=" << motor_output.roll_mix_us
+                      << " pitch_mix=" << motor_output.pitch_mix_us
+                      << " yaw_mix=" << motor_output.yaw_mix_us
                       << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
                       << motor_output.mixer_before_clamp[1] << ','
                       << motor_output.mixer_before_clamp[2] << ','
@@ -364,8 +369,11 @@ int main(int argc, char* argv[]) {
                       << ",yaw_rate_dps=" << pilot_command.yaw_rate_target_dps << ']'
                       << " mode=" << (mode_switch ? 1 : 0)
                       << " throttle=" << pilot_command.throttle
-                      << " motor_max_us=" << drone::kMotorMaxUs
+                      << " motor_max_us=" << motor_output.motor_max_us
                       << " base_us=" << motor_output.base_us
+                      << " roll_mix=" << motor_output.roll_mix_us
+                      << " pitch_mix=" << motor_output.pitch_mix_us
+                      << " yaw_mix=" << motor_output.yaw_mix_us
                       << " mixer_before_clamp=[" << motor_output.mixer_before_clamp[0] << ','
                       << motor_output.mixer_before_clamp[1] << ','
                       << motor_output.mixer_before_clamp[2] << ','

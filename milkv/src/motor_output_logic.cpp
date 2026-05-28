@@ -16,8 +16,15 @@ int clampBenchPwm(int value) {
 int throttleToBaseUs(float throttle) {
     const float safe_throttle = std::clamp(throttle, 0.0f, 1.0f);
     const double base = static_cast<double>(protocol::kPwmMinUs) +
-                        static_cast<double>(safe_throttle) * 1000.0;
+                        static_cast<double>(safe_throttle) *
+                            static_cast<double>(kMotorMaxUs - protocol::kPwmMinUs);
     return clampBenchPwm(static_cast<int>(std::lround(base)));
+}
+
+int stickToMixUs(float stick, int scale_us) {
+    const float safe_stick = std::clamp(stick, -1.0f, 1.0f);
+    return static_cast<int>(std::lround(static_cast<double>(safe_stick) *
+                                        static_cast<double>(scale_us)));
 }
 
 }  // namespace
@@ -25,6 +32,9 @@ int throttleToBaseUs(float throttle) {
 MotorOutputResult computeMotorOutput(const MotorOutputInput& input) {
     MotorOutputResult result;
     result.base_us = throttleToBaseUs(input.throttle);
+    result.roll_mix_us = stickToMixUs(input.roll_cmd, 200);
+    result.pitch_mix_us = stickToMixUs(input.pitch_cmd, 200);
+    result.yaw_mix_us = stickToMixUs(input.yaw_cmd, 150);
 
     if (!input.armed) {
         result.motor_output_enabled_reason = "disabled_not_armed";
@@ -38,6 +48,10 @@ MotorOutputResult computeMotorOutput(const MotorOutputInput& input) {
         result.motor_output_enabled_reason = "disabled_failsafe";
         return result;
     }
+    if (input.invalid_imu) {
+        result.motor_output_enabled_reason = "disabled_invalid_imu";
+        return result;
+    }
     if (input.throttle <= 0.0f) {
         result.motor_output_enabled_reason = "disabled_throttle_zero";
         return result;
@@ -46,9 +60,9 @@ MotorOutputResult computeMotorOutput(const MotorOutputInput& input) {
     MotorMixer mixer;
     result.mixer_before_clamp = mixer
                                     .mix(result.base_us,
-                                         input.roll_correction_us,
-                                         input.pitch_correction_us,
-                                         input.yaw_correction_us)
+                                         result.roll_mix_us,
+                                         result.pitch_mix_us,
+                                         result.yaw_mix_us)
                                     .asArray();
 
     for (std::size_t i = 0; i < result.motors_after_clamp.size(); ++i) {
