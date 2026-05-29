@@ -29,6 +29,10 @@ int stickToMixUs(float stick, int scale_us) {
 
 }  // namespace
 
+bool isEmergencyStopSwaUs(int swa_us) {
+    return swa_us > kEmergencyStopSwaThresholdUs;
+}
+
 MotorOutputResult computeMotorOutput(const MotorOutputInput& input) {
     MotorOutputResult result;
     result.base_us = throttleToBaseUs(input.throttle);
@@ -36,6 +40,10 @@ MotorOutputResult computeMotorOutput(const MotorOutputInput& input) {
     result.pitch_mix_us = stickToMixUs(input.pitch_cmd, 200);
     result.yaw_mix_us = stickToMixUs(input.yaw_cmd, 150);
 
+    if (input.emergency_stop) {
+        result.motor_output_enabled_reason = "emergency_stop";
+        return result;
+    }
     if (!input.armed) {
         result.motor_output_enabled_reason = "disabled_not_armed";
         return result;

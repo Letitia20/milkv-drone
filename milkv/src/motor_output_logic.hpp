@@ -6,12 +6,16 @@
 namespace drone {
 
 constexpr int kMotorMaxUs = 1800;
+constexpr int kEmergencyStopSwaThresholdUs = 1500;
+
+bool isEmergencyStopSwaUs(int swa_us);
 
 struct MotorOutputInput {
     bool armed {false};
     bool rc_valid {false};
     bool failsafe {true};
     bool invalid_imu {false};
+    bool emergency_stop {false};
     bool mode {false};
     float throttle {0.0f};
     float roll_cmd {0.0f};

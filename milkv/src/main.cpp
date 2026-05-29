@@ -30,6 +30,8 @@ constexpr double kMainLoopHz = 100.0;
 constexpr int kLowVoltageMv = 9600;
 constexpr int kThrottleLowUs = 1100;
 constexpr int kSwitchThresholdUs = 1500;
+constexpr int kSwaChannelIndex = 4;
+constexpr int kArmSwitchChannelIndex = 5;
 constexpr auto kRcTimeout = std::chrono::milliseconds(200);
 constexpr auto kHeartbeatPeriod = std::chrono::seconds(1);
 constexpr auto kAttitudeLogPeriod = std::chrono::milliseconds(100);  // 10 Hz
@@ -195,6 +197,7 @@ int main(int argc, char* argv[]) {
     auto last_rc_time = std::chrono::steady_clock::time_point::min();
 
     bool armed = false;
+    bool arm_switch_ready = false;
     bool low_voltage_latched = false;
 
     auto last_loop_time = std::chrono::steady_clock::now();
@@ -251,6 +254,8 @@ int main(int argc, char* argv[]) {
                                          : std::chrono::hours(24);
         const bool rc_fresh = rcChannelsSane(rc) && rc_age <= kRcTimeout;
         const bool rc_failsafe = (!rc_fresh) || rc.failsafe;
+        const int swa_us = rc.channels[kSwaChannelIndex];
+        const bool emergency_stop = drone::isEmergencyStopSwaUs(swa_us);
 
         if (battery.valid && battery.voltage_mv < kLowVoltageMv) {
             low_voltage_latched = true;
@@ -268,14 +273,22 @@ int main(int argc, char* argv[]) {
                                                     rc.channels[3],
                                                     flight_config);
         }
-        const bool armed_switch = rc_fresh && rc.channels[4] > kSwitchThresholdUs;
-        const bool mode_switch = rc_fresh && rc.channels[5] > kSwitchThresholdUs;
+        const bool arm_switch_high = rc_fresh && rc.channels[kArmSwitchChannelIndex] > kSwitchThresholdUs;
+        const bool mode_switch = false;
 
-        if (rc_failsafe || !battery_ok || invalid_imu_safety || !armed_switch) {
+        if (!arm_switch_high) {
+            arm_switch_ready = true;
+        }
+        if (emergency_stop) {
+            arm_switch_ready = false;
+        }
+
+        if (emergency_stop || rc_failsafe || !battery_ok || invalid_imu_safety || !arm_switch_high) {
             armed = false;
             pilot_command = {};
-        } else if (!armed && armed_switch && throttle_low) {
+        } else if (!armed && arm_switch_ready && arm_switch_high && throttle_low) {
             armed = true;
+            arm_switch_ready = false;
         }
 
         double pid_roll_out = 0.0;
@@ -296,6 +309,7 @@ int main(int argc, char* argv[]) {
         motor_input.rc_valid = rc_fresh;
         motor_input.failsafe = rc_failsafe;
         motor_input.invalid_imu = invalid_imu_safety;
+        motor_input.emergency_stop = emergency_stop;
         motor_input.mode = mode_switch;
         motor_input.throttle = pilot_command.throttle;
         motor_input.roll_cmd = pilot_command.roll_stick;
@@ -323,6 +337,8 @@ int main(int argc, char* argv[]) {
                       << " gy_dps=" << imu_sample.gy_dps
                       << " gz_dps=" << imu_sample.gz_dps
                       << " invalid_imu=" << (invalid_imu_safety ? 1 : 0)
+                      << " emergency_stop=" << (emergency_stop ? 1 : 0)
+                      << " swa_us=" << swa_us
                       << " pid_r=" << pid_roll_out
                       << " pid_p=" << pid_pitch_out
                       << " pid_y=" << pid_yaw_out
@@ -359,6 +375,8 @@ int main(int argc, char* argv[]) {
                       << " low_voltage=" << (low_voltage_latched ? 1 : 0)
                       << " imu_valid=" << (imu_valid ? 1 : 0)
                       << " invalid_imu=" << (invalid_imu_safety ? 1 : 0)
+                      << " emergency_stop=" << (emergency_stop ? 1 : 0)
+                      << " swa_us=" << swa_us
                       << " rc_ch=[" << rc.channels[0] << ',' << rc.channels[1] << ','
                       << rc.channels[2] << ',' << rc.channels[3] << ','
                       << rc.channels[4] << ',' << rc.channels[5] << ']'

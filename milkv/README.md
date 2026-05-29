@@ -42,8 +42,8 @@ Implemented on the Milk-V side:
 Current safety behavior:
 
 - ESC output stays at `1000us` unless RC is fresh, failsafe is clear, IMU is
-  valid, voltage safety has not latched, channel 5 is high, and throttle was low
-  before arming.
+  valid, voltage safety has not latched, SWA/CH5 is in the normal position,
+  CH6 has been cycled through disarm, and throttle was low before arming.
 - Motor output is capped at `1800us`.
 - Startup only makes the controller ready for remote arming; it does not
   automatically arm or take off.
@@ -143,14 +143,17 @@ middle:  1500us
 maximum: 2000us
 ```
 
-The current Milk-V-only program treats channel 5 as the arm switch:
+The current Milk-V-only program treats channel 5 as the SWA emergency stop:
 
 ```text
-arm request:    ch5 >= 1800
-disarm request: ch5 <= 1200
-throttle low:   ch3 <= 1100
-RC timeout:     200 ms
-low voltage:    < 9600 mV
+SWA normal:       ch5 ~= 1000
+SWA emergency:    ch5 ~= 2000
+emergency stop:   ch5 > 1500
+arm request:      ch6 > 1500 after ch6 has been low
+disarm request:   ch6 <= 1500
+throttle low:     ch3 <= 1100
+RC timeout:       200 ms
+low voltage:      < 9600 mV
 ```
 
 ## Build
@@ -238,6 +241,9 @@ Current `milkv_drone` IMU behavior:
 - prints attitude + raw accel/gyro log at 10 Hz
 - writes ESC PWM directly and keeps outputs at 1000us until all arm conditions
   are true
+- logs `emergency_stop=0/1` and `swa_us=<ch5>` in heartbeat and attitude lines
+- forces all ESC outputs to 1000us with reason `emergency_stop` whenever
+  SWA/CH5 is above 1500us
 ```
 
 Before connecting PID or motor output, run the standalone MPU6050 bring-up test:
@@ -292,10 +298,12 @@ Run these tests before enabling real motor output:
 3. ESC PWM stays at `1000us` while disarmed.
 4. RC channel values update once the IA6B receiver is active.
 5. Pulling the receiver signal triggers failsafe and forces all ESC outputs to `1000us`.
-6. Channel 5 arms only when throttle is low and all safety conditions are true.
-7. Low voltage telemetry latches disarm when battery sensing is valid.
-8. After installing autostart, rebooting Milk-V starts `milkv_drone` without a USB command session.
-9. No propellers are installed during every test above.
+6. SWA/CH5 at about 2000us triggers emergency stop and forces all ESC outputs to `1000us`.
+7. Returning SWA/CH5 to about 1000us does not re-arm until the normal arm flow is repeated.
+8. CH6 arms only after it has been low, throttle is low, and all safety conditions are true.
+9. Low voltage telemetry latches disarm when battery sensing is valid.
+10. After installing autostart, rebooting Milk-V starts `milkv_drone` without a USB command session.
+11. No propellers are installed during every test above.
 ```
 
 ## Roadmap

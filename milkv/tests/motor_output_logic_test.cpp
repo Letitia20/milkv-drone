@@ -23,6 +23,23 @@ bool expectArray(const std::array<int, 4>& actual,
 
 int main() {
     drone::MotorOutputInput input;
+    if (drone::isEmergencyStopSwaUs(1000)) {
+        std::cerr << "SWA 1000us should be normal, not emergency stop\n";
+        return 1;
+    }
+    if (!drone::isEmergencyStopSwaUs(2000)) {
+        std::cerr << "SWA 2000us should be emergency stop\n";
+        return 1;
+    }
+    if (drone::isEmergencyStopSwaUs(1500)) {
+        std::cerr << "SWA 1500us should not trip emergency stop; threshold is >1500\n";
+        return 1;
+    }
+    if (!drone::isEmergencyStopSwaUs(1501)) {
+        std::cerr << "SWA 1501us should trip emergency stop\n";
+        return 1;
+    }
+
     input.armed = true;
     input.rc_valid = true;
     input.failsafe = false;
@@ -135,6 +152,23 @@ int main() {
     if (invalid_imu.motor_output_enabled_reason != "disabled_invalid_imu") {
         std::cerr << "invalid imu reason mismatch: "
                   << invalid_imu.motor_output_enabled_reason << "\n";
+        return 1;
+    }
+
+    input.armed = false;
+    input.rc_valid = false;
+    input.failsafe = true;
+    input.invalid_imu = true;
+    input.throttle = 0.0f;
+    input.emergency_stop = true;
+    const drone::MotorOutputResult emergency_stop = drone::computeMotorOutput(input);
+    if (!expectArray(emergency_stop.motors_after_clamp, {1000, 1000, 1000, 1000},
+                     "emergency stop output")) {
+        return 1;
+    }
+    if (emergency_stop.motor_output_enabled_reason != "emergency_stop") {
+        std::cerr << "emergency stop reason mismatch: "
+                  << emergency_stop.motor_output_enabled_reason << "\n";
         return 1;
     }
 

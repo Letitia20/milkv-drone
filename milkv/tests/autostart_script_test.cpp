@@ -27,6 +27,17 @@ bool expectContains(const std::string& text,
     return false;
 }
 
+bool expectNotContains(const std::string& text,
+                       const std::string& needle,
+                       const std::string& label) {
+    if (text.find(needle) == std::string::npos) {
+        return true;
+    }
+
+    std::cerr << "unexpected " << label << ": " << needle << "\n";
+    return false;
+}
+
 }  // namespace
 
 int main() {
@@ -47,6 +58,10 @@ int main() {
                         "defaults to 115200 baud") && ok;
     ok = expectContains(script, "\"${APP}\" \"${IBUS_DEVICE}\" \"${BAUDRATE}\"",
                         "starts controller with device and baud") && ok;
+    ok = expectNotContains(script, "ESTOP_GPIO",
+                           "hardware emergency-stop GPIO config") && ok;
+    ok = expectNotContains(script, "--estop-gpio",
+                           "hardware emergency-stop command-line argument") && ok;
     ok = expectContains(script, "chmod +x \"${AUTO_SH}\"",
                         "marks auto.sh executable") && ok;
 
