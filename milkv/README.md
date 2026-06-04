@@ -10,8 +10,7 @@ Milk-V Duo 256M: controller, iBUS receiver input, IMU, filter, PID, motor mixing
                  ESC PWM output, telemetry log, startup script
 ```
 
-The previous STM32 coprocessor path is not required for this setup. Because
-Linux is not a hard-realtime flight controller, keep early tests conservative:
+Because Linux is not a hard-realtime flight controller, keep early tests conservative:
 remove propellers for software checks, keep the bench PWM cap in place, and use
 a physical power cutoff during bring-up.
 

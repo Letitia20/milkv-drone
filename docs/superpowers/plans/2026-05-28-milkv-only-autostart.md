@@ -57,7 +57,7 @@ Expected: pass with `autostart_script_test passed`.
 
 - [ ] **Step 1: Update architecture text**
 
-Change the architecture to state that Milk-V is the active controller and STM32 is not required for the current Milk-V-only setup.
+Change the architecture to state that Milk-V is the active controller for the current setup.
 
 - [ ] **Step 2: Update upload and autostart instructions**
 
@@ -76,9 +76,9 @@ Keep the no-propeller bench-test warnings and list the runtime arm conditions: v
 
 - [ ] **Step 4: Verify text references**
 
-Run: `Select-String -Path D:\drone\milkv\README.md -Pattern 'STM32 must|STM32 receives|MOT,1000|UART Protocol'`
+Run: `Select-String -Path D:\drone\milkv\README.md -Pattern 'MOT,1000|UART Protocol'`
 
-Expected: no stale text claiming STM32 is required in the Milk-V-only runtime path.
+Expected: no stale text from the old UART motor-command path.
 
 ### Task 3: Full Verification
 
