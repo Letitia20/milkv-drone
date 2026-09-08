@@ -1,3 +1,4 @@
+// 测试目标：验证 iBUS 32 字节帧解析和校验逻辑。
 #include "ibus_receiver.hpp"
 
 #include <array>

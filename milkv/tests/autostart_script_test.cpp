@@ -1,3 +1,4 @@
+// 测试目标：检查 Milk-V 自启动脚本是否写入正确路径、参数和蓝牙遥测启动项。
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -56,8 +57,14 @@ int main() {
                         "defaults to iBUS UART") && ok;
     ok = expectContains(script, "BAUDRATE=\"${BAUDRATE:-115200}\"",
                         "defaults to 115200 baud") && ok;
+    ok = expectContains(script, "BLUETOOTH_DEVICE=\"${BLUETOOTH_DEVICE:-/dev/ttyS0}\"",
+                        "defaults to HC-05 UART") && ok;
+    ok = expectContains(script, "BLUETOOTH_BAUD=\"${BLUETOOTH_BAUD:-9600}\"",
+                        "defaults to HC-05 baudrate") && ok;
     ok = expectContains(script, "\"${APP}\" \"${IBUS_DEVICE}\" \"${BAUDRATE}\"",
                         "starts controller with device and baud") && ok;
+    ok = expectContains(script, "--bluetooth-device \"${BLUETOOTH_DEVICE}\" --bluetooth-baud \"${BLUETOOTH_BAUD}\"",
+                        "starts controller with HC-05 telemetry arguments") && ok;
     ok = expectNotContains(script, "ESTOP_GPIO",
                            "hardware emergency-stop GPIO config") && ok;
     ok = expectNotContains(script, "--estop-gpio",

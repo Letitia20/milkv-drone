@@ -1,3 +1,4 @@
+// 测试目标：验证电机安全输出、PID 修正混控、急停和低电压降高逻辑。
 #include "motor_output_logic.hpp"
 
 #include <array>
@@ -85,6 +86,32 @@ int main() {
         return 1;
     }
 
+    input.throttle = 0.5f;
+    input.roll_cmd = 1.0f;
+    input.pitch_cmd = 1.0f;
+    input.yaw_cmd = 1.0f;
+    input.use_pid_corrections = true;
+    input.roll_correction_us = 120.0;
+    input.pitch_correction_us = -80.0;
+    input.yaw_correction_us = 45.0;
+    const drone::MotorOutputResult pid_mix = drone::computeMotorOutput(input);
+    if (pid_mix.roll_mix_us != 120 || pid_mix.pitch_mix_us != -80 ||
+        pid_mix.yaw_mix_us != 45) {
+        std::cerr << "PID mix values expected [120,-80,45] got ["
+                  << pid_mix.roll_mix_us << ',' << pid_mix.pitch_mix_us << ','
+                  << pid_mix.yaw_mix_us << "]\n";
+        return 1;
+    }
+    if (!expectArray(pid_mix.mixer_before_clamp, {1395, 1245, 1645, 1315},
+                     "PID mix before clamp")) {
+        return 1;
+    }
+
+    input.use_pid_corrections = false;
+    input.roll_correction_us = 0.0;
+    input.pitch_correction_us = 0.0;
+    input.yaw_correction_us = 0.0;
+
     input.throttle = 1.0f;
     input.roll_cmd = 1.0f;
     input.pitch_cmd = 1.0f;
@@ -125,6 +152,30 @@ int main() {
         std::cerr << "disarmed reason mismatch: " << disarmed.motor_output_enabled_reason << "\n";
         return 1;
     }
+
+    input.armed = true;
+    input.rc_valid = true;
+    input.failsafe = false;
+    input.invalid_imu = false;
+    input.emergency_stop = false;
+    input.low_voltage = true;
+    input.throttle = 0.85f;
+    const drone::MotorOutputResult low_voltage_descent = drone::computeMotorOutput(input);
+    if (!expectArray(low_voltage_descent.motors_after_clamp, {1200, 1200, 1200, 1200},
+                     "low voltage descent output")) {
+        return 1;
+    }
+    if (low_voltage_descent.base_us != 1200) {
+        std::cerr << "low voltage descent base_us expected 1200 got "
+                  << low_voltage_descent.base_us << "\n";
+        return 1;
+    }
+    if (low_voltage_descent.motor_output_enabled_reason != "low_voltage_descent") {
+        std::cerr << "low voltage descent reason mismatch: "
+                  << low_voltage_descent.motor_output_enabled_reason << "\n";
+        return 1;
+    }
+    input.low_voltage = false;
 
     input.armed = true;
     input.failsafe = true;

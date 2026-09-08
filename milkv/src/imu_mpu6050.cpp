@@ -24,6 +24,7 @@ constexpr std::uint8_t kRegAccelConfig = 0x1c;
 constexpr std::uint8_t kRegWhoAmI = 0x75;
 
 std::int16_t readBe16(const std::array<std::uint8_t, 14>& data, std::size_t offset) {
+    // MPU6050 寄存器是大端序：raw = high << 8 | low。
     const auto high = static_cast<std::uint16_t>(data[offset]);
     const auto low = static_cast<std::uint16_t>(data[offset + 1]);
     return static_cast<std::int16_t>((high << 8) | low);
@@ -34,6 +35,10 @@ std::int16_t readBe16(const std::array<std::uint8_t, 14>& data, std::size_t offs
 ImuSample decodeMpu6050Registers(const std::array<std::uint8_t, 14>& data) {
     ImuSample sample;
     sample.valid = true;
+    // 原始值换算公式：
+    // accel_g = raw / 16384.0（+-2g 量程）
+    // gyro_dps = raw / 131.0（+-250 deg/s 量程）
+    // temp_c = raw / 340.0 + 36.53
     sample.ax_g = static_cast<double>(readBe16(data, 0)) / 16384.0;
     sample.ay_g = static_cast<double>(readBe16(data, 2)) / 16384.0;
     sample.az_g = static_cast<double>(readBe16(data, 4)) / 16384.0;
@@ -54,7 +59,7 @@ bool isAllowedMpu6050Address(std::uint8_t address) {
 }
 
 bool isSupportedMpu6050WhoAmI(std::uint8_t who_am_i) {
-    return who_am_i == kMpu6050ExpectedWhoAmI || who_am_i == kMpu6050ObservedWhoAmI;
+    return who_am_i == kMpu6050ExpectedWhoAmI;
 }
 
 Mpu6050::~Mpu6050() {
@@ -101,8 +106,8 @@ bool Mpu6050::initialize(const std::string& i2c_device, std::uint8_t address) {
             return false;
         }
 
-        std::printf("[IMU] WHO_AM_I = 0x%02X (expected 0x%02X or 0x%02X)\n",
-                    who_am_i, kMpu6050ExpectedWhoAmI, kMpu6050ObservedWhoAmI);
+        std::printf("[IMU] WHO_AM_I = 0x%02X (expected 0x%02X)\n",
+                    who_am_i, kMpu6050ExpectedWhoAmI);
 
         if (!isSupportedMpu6050WhoAmI(who_am_i)) {
             std::printf("[IMU] FAIL: WHO_AM_I 0x%02X not supported\n", who_am_i);
@@ -123,6 +128,8 @@ bool Mpu6050::initialize(const std::string& i2c_device, std::uint8_t address) {
             std::printf("[IMU] writeRegister(PWR_MGMT_1=0x%02X, 0x00) success\n", kRegPwrMgmt1);
         }
 
+        // 采样率配置：SampleRate = GyroOutputRate / (1 + SMPLRT_DIV)。
+        // 这里写 0x07，配合 1kHz gyro 输出得到约 125Hz，满足作业 >=100Hz 要求。
         if (regs_ok && !writeRegister(kRegSmplrtDiv, 0x07)) {
             std::printf("[IMU] FAIL: writeRegister(SMPLRT_DIV=0x%02X, 0x07) failed, errno=%d (%s)\n",
                         kRegSmplrtDiv, errno, std::strerror(errno));

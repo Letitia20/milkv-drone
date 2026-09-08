@@ -2,6 +2,12 @@
 
 namespace drone {
 
+// 三轴姿态控制使用的 PID 控制器。
+// 公式：
+// error = setpoint - measurement
+// integral = integral + error * dt
+// derivative = (error - previous_error) / dt
+// output = Kp * error + Ki * integral + Kd * derivative
 class PID {
 public:
     PID(double kp = 0.0, double ki = 0.0, double kd = 0.0);

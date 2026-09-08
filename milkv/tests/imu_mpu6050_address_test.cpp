@@ -1,3 +1,4 @@
+// 测试目标：验证 MPU6050 允许地址列表，只接受 0x68/0x69。
 #include "imu_mpu6050.hpp"
 
 #include <iostream>

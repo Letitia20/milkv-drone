@@ -5,6 +5,8 @@
 
 namespace drone {
 
+// POSIX 串口封装：
+// iBUS、HC-05 或调试串口都可以复用此类做非阻塞读写。
 class SerialPort {
 public:
     SerialPort();

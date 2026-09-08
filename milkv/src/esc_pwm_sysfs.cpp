@@ -57,6 +57,7 @@ int clampEscPulseUs(int pulse_us) {
 }
 
 int escPulseUsToNs(int pulse_us) {
+    // sysfs PWM duty_cycle 使用 ns，电调输入常用 us。
     return clampEscPulseUs(pulse_us) * 1000;
 }
 
@@ -131,6 +132,7 @@ bool EscPwmSysfs::configureChannel(ChannelState& channel) {
         writeTextFile(polarity_path, "normal");
     }
 
+    // ESC 常用 50Hz 控制周期：period = 20ms = 20,000,000ns。
     if (!writeIntFile(joinPath(channel.pwm_path, "period"), kEscPwmPeriodNs)) {
         return false;
     }

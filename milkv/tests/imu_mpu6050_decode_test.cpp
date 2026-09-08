@@ -1,3 +1,4 @@
+// 测试目标：验证 MPU6050 原始寄存器到 g、deg/s、摄氏度的换算公式。
 #include "imu_mpu6050.hpp"
 
 #include <array>

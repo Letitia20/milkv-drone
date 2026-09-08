@@ -1,3 +1,4 @@
+// 测试目标：验证 ESC sysfs PWM 导出、周期和 duty_cycle 写入逻辑。
 #include "esc_pwm_sysfs.hpp"
 
 #include <iostream>

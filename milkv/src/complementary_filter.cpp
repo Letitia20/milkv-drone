@@ -20,6 +20,9 @@ Attitude ComplementaryFilter::update(const ImuSample& sample, double dt_s) {
         return invalid_attitude;
     }
 
+    // 加速度姿态公式：
+    // roll_acc = atan2(ay, az) * 180 / pi
+    // pitch_acc = atan2(-ax, sqrt(ay^2 + az^2)) * 180 / pi
     const double roll_acc = std::atan2(sample.ay_g, sample.az_g) * kRadToDeg;
     const double pitch_acc =
         std::atan2(-sample.ax_g, std::sqrt(sample.ay_g * sample.ay_g + sample.az_g * sample.az_g)) *
@@ -34,9 +37,11 @@ Attitude ComplementaryFilter::update(const ImuSample& sample, double dt_s) {
         return attitude_;
     }
 
+    // 陀螺积分公式：angle_gyro(k) = angle(k-1) + gyro_dps * dt
     const double roll_gyro = attitude_.roll_deg + sample.gx_dps * dt_s;
     const double pitch_gyro = attitude_.pitch_deg + sample.gy_dps * dt_s;
 
+    // 互补滤波公式：angle = alpha * angle_gyro + (1 - alpha) * angle_acc
     attitude_.roll_deg = alpha_ * roll_gyro + (1.0 - alpha_) * roll_acc;
     attitude_.pitch_deg = alpha_ * pitch_gyro + (1.0 - alpha_) * pitch_acc;
     attitude_.valid = true;

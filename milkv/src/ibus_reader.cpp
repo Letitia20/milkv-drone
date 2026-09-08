@@ -1,4 +1,8 @@
-/* iBUS software reader for Milk-V Duo
+/* Milk-V 软解码 iBUS 功能：
+ * 通过 GP3 读取反相 UART，使用 RISC-V rdcycle 做位时间采样。
+ * 位时间公式：1 bit = 1e9 / 115200 ≈ 8680ns。
+ *
+ * iBUS software reader for Milk-V Duo
  * Reads inverted UART (idle low) from GPIO pin using RISC-V cycle counter timing.
  * Outputs "RC,ch1,ch2,ch3,ch4,ch5,ch6,failsafe" lines on stdout at 10 Hz. */
 #include <cstdint>

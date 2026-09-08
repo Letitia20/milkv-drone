@@ -52,6 +52,7 @@ bool parseIntStrict(const std::string& text, int& out) {
 }  // namespace
 
 bool parseRcLine(const std::string& line, RcData& out) {
+    // RC 输入格式：RC,ch1,ch2,ch3,ch4,ch5,ch6,failsafe
     const auto parts = splitCsv(line);
     if (parts.size() != 8 || parts[0] != "RC") {
         return false;
@@ -76,6 +77,7 @@ bool parseRcLine(const std::string& line, RcData& out) {
 }
 
 bool parseBatteryLine(const std::string& line, BatteryData& out) {
+    // 电池输入格式：BAT,<millivolts>，例如 BAT,9500。
     const auto parts = splitCsv(line);
     if (parts.size() != 2 || parts[0] != "BAT") {
         return false;
@@ -96,6 +98,7 @@ int clampPwm(int value) {
 }
 
 std::string encodeMotLine(const std::array<int, 4>& motors) {
+    // 电机输出格式：MOT,m1,m2,m3,m4，四路均会限制在 1000..2000us。
     std::ostringstream oss;
     oss << "MOT";
     for (const int motor : motors) {

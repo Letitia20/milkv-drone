@@ -1,3 +1,4 @@
+// 测试目标：验证互补滤波器对有效/无效 IMU 数据的 valid 状态处理。
 #include "complementary_filter.hpp"
 
 #include <iostream>

@@ -44,6 +44,7 @@ float applyThrottleCurve(float throttle, const FlightControlConfig& config) {
         return 0.0f;
     }
 
+    // 平方油门曲线：低油门更柔和，高油门仍能达到满输出。
     const float normalized = (raw - cutoff) / (1.0f - cutoff);
     return normalized * normalized;
 }
@@ -59,6 +60,10 @@ PilotCommand makePilotCommand(int roll_us,
     command.yaw_stick = applyDeadband(normStickUs(yaw_us), config.stick_deadband);
     command.throttle = applyThrottleCurve(normThrottleUs(throttle_us), config);
 
+    // 姿态目标换算：
+    // roll_target = roll_stick * max_angle
+    // pitch_target = pitch_stick * max_angle
+    // yaw_rate_target = yaw_stick * max_yaw_rate
     command.roll_target_deg = command.roll_stick * config.max_angle_deg;
     command.pitch_target_deg = command.pitch_stick * config.max_angle_deg;
     command.yaw_rate_target_dps = command.yaw_stick * config.max_yaw_rate_dps;

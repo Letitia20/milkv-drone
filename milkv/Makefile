@@ -1,4 +1,6 @@
 TARGET := milkv_drone
+# 功能：构建 Milk-V 端飞控、IMU 测试程序、iBUS 读取程序和主机侧单元测试。
+# 板端构建必须使用 Milk-V duo-examples/envsetup.sh 提供的 RISC-V musl 工具链。
 MPU_TEST_TARGET := mpu_test
 IBUS_READ_TARGET := ibus_read
 SRC_DIR := src
@@ -6,9 +8,12 @@ BUILD_DIR := build/duo-riscv64
 HOST_BUILD_DIR := build/host-tests
 HOST_CXX ?= g++
 HOST_AUTOSTART_TEST := $(HOST_BUILD_DIR)/autostart_script_test.exe
+HOST_BATTERY_MONITOR_TEST := $(HOST_BUILD_DIR)/battery_monitor_test.exe
+HOST_BLUETOOTH_TELEMETRY_TEST := $(HOST_BUILD_DIR)/bluetooth_telemetry_test.exe
+HOST_BUZZER_GPIO_TEST := $(HOST_BUILD_DIR)/buzzer_gpio_test.exe
 HOST_FLIGHT_CONTROL_TEST := $(HOST_BUILD_DIR)/flight_control_test.exe
 HOST_MOTOR_OUTPUT_LOGIC_TEST := $(HOST_BUILD_DIR)/motor_output_logic_test.exe
-HOST_TESTS := $(HOST_AUTOSTART_TEST) $(HOST_FLIGHT_CONTROL_TEST) $(HOST_MOTOR_OUTPUT_LOGIC_TEST)
+HOST_TESTS := $(HOST_AUTOSTART_TEST) $(HOST_BATTERY_MONITOR_TEST) $(HOST_BLUETOOTH_TELEMETRY_TEST) $(HOST_BUZZER_GPIO_TEST) $(HOST_FLIGHT_CONTROL_TEST) $(HOST_MOTOR_OUTPUT_LOGIC_TEST)
 USE_RT ?= 0
 
 ifneq ($(filter host-test,$(MAKECMDGOALS)),host-test)
@@ -80,11 +85,23 @@ $(BUILD_DIR):
 
 host-test: $(HOST_TESTS)
 	./$(HOST_AUTOSTART_TEST)
+	./$(HOST_BATTERY_MONITOR_TEST)
+	./$(HOST_BLUETOOTH_TELEMETRY_TEST)
+	./$(HOST_BUZZER_GPIO_TEST)
 	./$(HOST_FLIGHT_CONTROL_TEST)
 	./$(HOST_MOTOR_OUTPUT_LOGIC_TEST)
 
 $(HOST_AUTOSTART_TEST): tests/autostart_script_test.cpp | $(HOST_BUILD_DIR)
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) $< -o $@
+
+$(HOST_BATTERY_MONITOR_TEST): tests/battery_monitor_test.cpp $(SRC_DIR)/battery_monitor.cpp $(SRC_DIR)/battery_monitor.hpp $(SRC_DIR)/protocol.cpp $(SRC_DIR)/protocol.hpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/battery_monitor_test.cpp $(SRC_DIR)/battery_monitor.cpp $(SRC_DIR)/protocol.cpp -o $@
+
+$(HOST_BLUETOOTH_TELEMETRY_TEST): tests/bluetooth_telemetry_test.cpp $(SRC_DIR)/bluetooth_telemetry.cpp $(SRC_DIR)/bluetooth_telemetry.hpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/bluetooth_telemetry_test.cpp $(SRC_DIR)/bluetooth_telemetry.cpp -o $@
+
+$(HOST_BUZZER_GPIO_TEST): tests/buzzer_gpio_test.cpp $(SRC_DIR)/buzzer_gpio.cpp $(SRC_DIR)/buzzer_gpio.hpp | $(HOST_BUILD_DIR)
+	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/buzzer_gpio_test.cpp $(SRC_DIR)/buzzer_gpio.cpp -o $@
 
 $(HOST_FLIGHT_CONTROL_TEST): tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp $(SRC_DIR)/flight_control.hpp | $(HOST_BUILD_DIR)
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Wpedantic -I $(SRC_DIR) tests/flight_control_test.cpp $(SRC_DIR)/flight_control.cpp -o $@

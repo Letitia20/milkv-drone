@@ -1,3 +1,4 @@
+// 测试目标：验证遥控死区、平方油门曲线和目标姿态角换算公式。
 #include "flight_control.hpp"
 
 #include <cmath>

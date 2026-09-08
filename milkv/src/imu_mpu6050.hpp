@@ -6,11 +6,11 @@
 
 namespace drone {
 
+// MPU6050 默认接在 Milk-V 的 I2C2，总线设备为 /dev/i2c-2。
 constexpr const char* kMpu6050DefaultI2cDevice = "/dev/i2c-2";
 constexpr std::uint8_t kMpu6050DefaultAddress = 0x68;
 constexpr std::uint8_t kMpu6050AlternateAddress = 0x69;
-constexpr std::uint8_t kMpu6050ExpectedWhoAmI = 0x68;
-constexpr std::uint8_t kMpu6050ObservedWhoAmI = 0x70;
+constexpr std::uint8_t kMpu6050ExpectedWhoAmI = 0x70;
 constexpr std::array<std::uint8_t, 2> kMpu6050AllowedAddresses {
     kMpu6050DefaultAddress,
     kMpu6050AlternateAddress,
@@ -30,6 +30,8 @@ struct ImuSample {
     double temperature_c {25.0};
 };
 
+// 将 MPU6050 连续 14 字节寄存器解码为物理量：
+// 加速度单位 g，陀螺仪单位 deg/s，温度单位摄氏度。
 ImuSample decodeMpu6050Registers(const std::array<std::uint8_t, 14>& data);
 bool isAllowedMpu6050Address(std::uint8_t address);
 bool isSupportedMpu6050WhoAmI(std::uint8_t who_am_i);

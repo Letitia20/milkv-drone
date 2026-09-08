@@ -6,6 +6,8 @@
 
 namespace drone {
 
+// 固定频率循环辅助类。
+// 周期公式：period = 1 / hz；100Hz 时 period = 0.01s = 10ms。
 class LoopRate {
 public:
     explicit LoopRate(double hz)

@@ -8,6 +8,7 @@ namespace drone {
 
 namespace ibus {
 
+// iBUS 帧格式：32 字节，起始长度 0x20，命令字 0x40，后面是 14 路通道和校验。
 constexpr std::size_t kFrameLength = 32;
 constexpr std::uint8_t kCommand = 0x40;
 constexpr std::size_t kChecksumBytes = 30;

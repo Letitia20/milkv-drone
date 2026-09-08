@@ -81,6 +81,7 @@ bool SerialPort::open(const std::string& device, int baudrate) {
         return false;
     }
 
+    // 配置 8N1 原始串口：8 数据位、无校验、1 停止位、不做行处理。
     tty.c_iflag &= static_cast<tcflag_t>(
         ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON));
     tty.c_oflag &= static_cast<tcflag_t>(~OPOST);
@@ -130,6 +131,7 @@ std::vector<std::string> SerialPort::readLines() {
     }
 
     char buffer[256];
+    // 非阻塞读取，把收到的字节累计到 rx_buffer_，再按 '\n' 切分成完整文本行。
     for (;;) {
         const ssize_t n = ::read(fd_, buffer, sizeof(buffer));
         if (n > 0) {

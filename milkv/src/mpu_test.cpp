@@ -14,11 +14,14 @@ namespace {
 
 std::atomic<bool> g_running {true};
 
+// MPU6050 单独测试程序：
+// 按固定频率输出 ax ay az gx gy gz，方便确认 I2C、方向和传感器安装是否正确。
 void handleSignal(int) {
     g_running = false;
 }
 
 double parseRateHz(const char* text, double fallback) {
+    // 采样周期公式：period = 1 / rate_hz。
     if (text == nullptr) {
         return fallback;
     }

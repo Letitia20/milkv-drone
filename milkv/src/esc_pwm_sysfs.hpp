@@ -11,6 +11,7 @@ constexpr int kEscPwmMaxUs = 2000;
 constexpr int kEscPwmLowChipBase = 4;
 constexpr int kEscPwmHighChipBase = 8;
 
+// 每个电调对应的 Milk-V 引脚和 sysfs PWM 通道。
 struct EscPwmConfig {
     int esc_id;
     const char* position;
@@ -23,9 +24,13 @@ struct EscPwmConfig {
 
 const std::array<EscPwmConfig, 4>& escPwmConfigs();
 
+// ESC 脉宽限制：正常范围 1000us 到 2000us，早期试飞再由 motor_output_logic 限到 1800us。
 int clampEscPulseUs(int pulse_us);
+
+// PWM 占空时间换算公式：duty_cycle_ns = pulse_us * 1000。
 int escPulseUsToNs(int pulse_us);
 
+// 通过 /sys/class/pwm 控制四路 ESC，负责 export、period、duty_cycle、enable。
 class EscPwmSysfs {
 public:
     explicit EscPwmSysfs(std::string pwm_root = "/sys/class/pwm");

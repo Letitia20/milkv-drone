@@ -24,6 +24,8 @@ bool parseFrame(const std::uint8_t* frame, std::size_t length, std::uint64_t now
         return false;
     }
 
+    // iBUS 校验公式：
+    // checksum = 0xffff - sum(frame[0..29])
     std::uint16_t checksum = kChecksumInitial;
     for (std::size_t i = 0; i < kChecksumBytes; ++i) {
         checksum = static_cast<std::uint16_t>(checksum - frame[i]);
@@ -35,6 +37,7 @@ bool parseFrame(const std::uint8_t* frame, std::size_t length, std::uint64_t now
         return false;
     }
 
+    // 通道值为小端 16 位：ch = low | (high << 8)，单位为 us。
     IBusChannels parsed;
     for (std::size_t ch = 0; ch < parsed.ch.size(); ++ch) {
         const std::size_t offset = 2 + ch * 2;

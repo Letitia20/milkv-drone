@@ -11,6 +11,7 @@ namespace {
 
 std::atomic<bool> g_running {true};
 
+// iBUS 单独测试程序：读取接收机串口帧并打印 CH1..CH14。
 void handleSignal(int) {
     g_running = false;
 }
